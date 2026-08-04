@@ -1,0 +1,101 @@
+name: Read-only Smart Lending state audit
+
+on:
+  push:
+    branches:
+      - audit/read-fsl-state
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query public state without sending transactions
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.request
+          import urllib.error
+
+          TARGETS = [
+              ("ethereum", "https://eth.blockscout.com/api/eth-rpc", "fSL19", "0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1"),
+              ("ethereum", "https://eth.blockscout.com/api/eth-rpc", "fSL28", "0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f"),
+              ("ethereum", "https://eth.blockscout.com/api/eth-rpc", "fSL41", "0xe461F968AA7A83a77bCF9568F1A10d09197c78d3"),
+              ("base", "https://base.blockscout.com/api/eth-rpc", "fSL6", "0x983107BB3dcb71f3A30176114D8a17c454A62514"),
+          ]
+
+          SELECTORS = {
+              "feeOrReward": "0xe47a882d",
+              "exchangePrice": "0x9e65741e",
+              "lastTimestamp": "0x19d8ac61",
+              "totalSupply": "0x18160ddd",
+              "rebalanceDiff": "0x92eb1656",
+              "getUpdateExchangePrice": "0xc89c74ea",
+          }
+
+          def rpc(url, method, params):
+              body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+              req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "User-Agent": "fluid-read-only-audit/1.0"})
+              last_error = None
+              for attempt in range(4):
+                  try:
+                      with urllib.request.urlopen(req, timeout=30) as response:
+                          data = json.load(response)
+                      if "error" in data:
+                          raise RuntimeError(data["error"])
+                      return data["result"]
+                  except Exception as exc:
+                      last_error = exc
+                      time.sleep(2 ** attempt)
+              raise RuntimeError(f"RPC failed after retries: {last_error}")
+
+          def call(url, address, selector):
+              return rpc(url, "eth_call", [{"to": address, "data": selector}, "latest"])
+
+          def signed(value, bits=256):
+              if value >= 1 << (bits - 1):
+                  value -= 1 << bits
+              return value
+
+          results = []
+          for chain, url, label, address in TARGETS:
+              item = {"chain": chain, "label": label, "address": address}
+              try:
+                  raw = {name: call(url, address, selector) for name, selector in SELECTORS.items()}
+                  slot5 = rpc(url, "eth_getStorageAt", [address, "0x5", "latest"])
+                  fee_abi_raw = int(raw["feeOrReward"], 16)
+                  fee_abi = signed(fee_abi_raw, 256)
+                  slot_value = int(slot5, 16)
+                  packed_fee_raw = (slot_value >> 40) & 0xFFFFFFFF
+                  packed_fee = signed(packed_fee_raw, 32)
+                  updated = raw["getUpdateExchangePrice"][2:].rjust(128, "0")
+                  item.update({
+                      "feeOrReward_ppm": fee_abi,
+                      "feeOrReward_percent": fee_abi / 10_000,
+                      "packed_feeOrReward_ppm": packed_fee,
+                      "exchangePrice": int(raw["exchangePrice"], 16),
+                      "lastTimestamp": int(raw["lastTimestamp"], 16),
+                      "totalSupply": int(raw["totalSupply"], 16),
+                      "rebalanceDiff": signed(int(raw["rebalanceDiff"], 16), 256),
+                      "updatedExchangePrice": int(updated[:64], 16),
+                      "rewardOrFeeActive": bool(int(updated[64:128], 16)),
+                      "slot5": slot5,
+                      "consistent_slot_decode": fee_abi == packed_fee,
+                  })
+              except Exception as exc:
+                  item["error"] = str(exc)
+              results.append(item)
+
+          print("READ_ONLY_AUDIT_RESULT_BEGIN")
+          print(json.dumps(results, indent=2, sort_keys=True))
+          print("READ_ONLY_AUDIT_RESULT_END")
+          if not any("feeOrReward_ppm" in item for item in results):
+              raise SystemExit("No target could be queried")
+          PY
