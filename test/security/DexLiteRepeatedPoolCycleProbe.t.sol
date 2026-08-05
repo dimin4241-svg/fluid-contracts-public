@@ -40,6 +40,9 @@ contract DexLiteRepeatedPoolCycleProbeTest is Test {
     uint256 internal constant DEXES_LIST_SLOT = 1;
     uint256 internal constant INTERNAL_DECIMALS = 9;
 
+    uint256 internal validQuotes;
+    int256 internal globalBest;
+
     event DexInventory(uint256 indexed index, address token0, address token1, bytes32 salt);
     event CycleQuote(
         uint256 indexed dexIndex,
@@ -50,7 +53,7 @@ contract DexLiteRepeatedPoolCycleProbeTest is Test {
         uint256 unspecified,
         int256 grossDelta
     );
-    event BestCycle(
+    event PositiveCycle(
         uint256 indexed dexIndex,
         uint256 hops,
         bool startsToken0,
@@ -92,6 +95,22 @@ contract DexLiteRepeatedPoolCycleProbeTest is Test {
         if (raw == 0) raw = 1;
     }
 
+    function _sizeAt(uint256 index) internal pure returns (uint256) {
+        if (index == 0) return 1e4;
+        if (index == 1) return 1e5;
+        if (index == 2) return 1e6;
+        if (index == 3) return 1e7;
+        if (index == 4) return 1e8;
+        return 1e9;
+    }
+
+    function _hopsAt(uint256 index) internal pure returns (uint256) {
+        if (index == 0) return 2;
+        if (index == 1) return 4;
+        if (index == 2) return 8;
+        return 16;
+    }
+
     function _buildCycle(
         DexKey memory key,
         uint256 hops,
@@ -127,7 +146,7 @@ contract DexLiteRepeatedPoolCycleProbeTest is Test {
         } catch (bytes memory reason) {
             if (reason.length != 36) return (false, 0);
             bytes4 selector;
-            assembly {
+            assembly ("memory-safe") {
                 selector := mload(add(reason, 0x20))
                 amountUnspecified := mload(add(reason, 0x24))
             }
@@ -135,75 +154,80 @@ contract DexLiteRepeatedPoolCycleProbeTest is Test {
         }
     }
 
+    function _record(
+        uint256 dexIndex,
+        uint256 hops,
+        bool startsToken0,
+        bool exactOutput,
+        uint256 specified,
+        uint256 unspecified,
+        int256 delta
+    ) internal {
+        ++validQuotes;
+        if (delta > globalBest) globalBest = delta;
+        emit CycleQuote(dexIndex, hops, startsToken0, exactOutput, specified, unspecified, delta);
+        if (delta > 0) {
+            emit PositiveCycle(dexIndex, hops, startsToken0, exactOutput, specified, unspecified, delta);
+        }
+    }
+
+    function _probeOne(
+        uint256 dexIndex,
+        DexKey memory key,
+        uint256 hops,
+        bool startsToken0,
+        uint256 internalSize
+    ) internal {
+        (address[] memory path, DexKey[] memory keys) = _buildCycle(key, hops, startsToken0);
+        uint256 amount = _rawFromInternal(internalSize, _decimals(path[0]));
+        if (amount > uint256(type(int256).max)) return;
+
+        (bool okOut, uint256 requiredInput) = _estimate(path, keys, -int256(amount));
+        if (okOut) {
+            _record(
+                dexIndex,
+                hops,
+                startsToken0,
+                true,
+                amount,
+                requiredInput,
+                int256(amount) - int256(requiredInput)
+            );
+        }
+
+        (bool okIn, uint256 receivedOutput) = _estimate(path, keys, int256(amount));
+        if (okIn) {
+            _record(
+                dexIndex,
+                hops,
+                startsToken0,
+                false,
+                amount,
+                receivedOutput,
+                int256(receivedOutput) - int256(amount)
+            );
+        }
+    }
+
     function test_allLiveDexes_repeatedPoolCycles() public {
         uint256 count = IDexLiteCycleProbe(DEX_LITE).readFromStorage(bytes32(DEXES_LIST_SLOT));
         assertGt(count, 0, "no live dexes");
-
-        uint256[6] memory internalSizes = [uint256(1e4), 1e5, 1e6, 1e7, 1e8, 1e9];
-        uint256[4] memory hopCounts = [uint256(2), 4, 8, 16];
-        int256 globalBest;
-        uint256 validQuotes;
 
         for (uint256 dexIndex; dexIndex < count; ++dexIndex) {
             DexKey memory key = _readDex(dexIndex);
             emit DexInventory(dexIndex, key.token0, key.token1, key.salt);
 
-            for (uint256 h; h < hopCounts.length; ++h) {
-                uint256 hops = hopCounts[h];
+            for (uint256 hopIndex; hopIndex < 4; ++hopIndex) {
                 for (uint256 side; side < 2; ++side) {
-                    bool startsToken0 = side == 0;
-                    (address[] memory path, DexKey[] memory keys) = _buildCycle(key, hops, startsToken0);
-                    uint8 endpointDecimals = _decimals(path[0]);
-
-                    int256 localBest;
-                    uint256 bestSpecified;
-                    uint256 bestUnspecified;
-                    bool bestExactOutput;
-
-                    for (uint256 s; s < internalSizes.length; ++s) {
-                        uint256 amount = _rawFromInternal(internalSizes[s], endpointDecimals);
-                        if (amount > uint256(type(int256).max)) continue;
-
-                        // Exact output: profit exists when required input is less than output.
-                        (bool okOut, uint256 requiredInput) = _estimate(path, keys, -int256(amount));
-                        if (okOut) {
-                            ++validQuotes;
-                            int256 deltaOut = int256(amount) - int256(requiredInput);
-                            emit CycleQuote(dexIndex, hops, startsToken0, true, amount, requiredInput, deltaOut);
-                            if (deltaOut > localBest) {
-                                localBest = deltaOut;
-                                bestSpecified = amount;
-                                bestUnspecified = requiredInput;
-                                bestExactOutput = true;
-                            }
-                            if (deltaOut > globalBest) globalBest = deltaOut;
-                        }
-
-                        // Exact input: profit exists when output is greater than supplied input.
-                        (bool okIn, uint256 receivedOutput) = _estimate(path, keys, int256(amount));
-                        if (okIn) {
-                            ++validQuotes;
-                            int256 deltaIn = int256(receivedOutput) - int256(amount);
-                            emit CycleQuote(dexIndex, hops, startsToken0, false, amount, receivedOutput, deltaIn);
-                            if (deltaIn > localBest) {
-                                localBest = deltaIn;
-                                bestSpecified = amount;
-                                bestUnspecified = receivedOutput;
-                                bestExactOutput = false;
-                            }
-                            if (deltaIn > globalBest) globalBest = deltaIn;
-                        }
+                    for (uint256 sizeIndex; sizeIndex < 6; ++sizeIndex) {
+                        _probeOne(
+                            dexIndex,
+                            key,
+                            _hopsAt(hopIndex),
+                            side == 0,
+                            _sizeAt(sizeIndex)
+                        );
                     }
-
-                    emit BestCycle(
-                        dexIndex,
-                        hops,
-                        startsToken0,
-                        bestExactOutput,
-                        bestSpecified,
-                        bestUnspecified,
-                        localBest
-                    );
                 }
             }
         }
