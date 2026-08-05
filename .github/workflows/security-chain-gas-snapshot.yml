@@ -1,0 +1,118 @@
+name: Security chain gas and block-limit snapshot
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/security-chain-gas-snapshot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    name: ${{ matrix.network }} gas snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - network: mainnet
+            rpc: https://ethereum-rpc.publicnode.com
+            native: ETH
+          - network: arbitrum
+            rpc: https://arbitrum-one-rpc.publicnode.com
+            native: ETH
+          - network: base
+            rpc: https://base-rpc.publicnode.com
+            native: ETH
+          - network: polygon
+            rpc: https://polygon-bor-rpc.publicnode.com
+            native: POL
+          - network: bnb
+            rpc: https://bsc-rpc.publicnode.com
+            native: BNB
+          - network: plasma
+            rpc: https://rpc.plasma.to
+            native: XPL
+    steps:
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Web3
+        run: python -m pip install 'web3>=7,<8'
+
+      - name: Read latest public chain state
+        env:
+          NETWORK: ${{ matrix.network }}
+          RPC_URL: ${{ matrix.rpc }}
+          NATIVE_SYMBOL: ${{ matrix.native }}
+        shell: bash
+        run: |
+          mkdir -p gas-snapshot/${NETWORK}
+          python - <<'PY'
+          import json
+          import os
+          import time
+          from pathlib import Path
+          from web3 import Web3
+
+          network = os.environ['NETWORK']
+          rpc = os.environ['RPC_URL']
+          w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={'timeout': 60}))
+          if not w3.is_connected():
+              raise SystemExit(f'RPC unavailable: {network}')
+
+          block = w3.eth.get_block('latest')
+          gas_price = int(w3.eth.gas_price)
+          try:
+              priority = int(w3.eth.max_priority_fee)
+          except Exception:
+              priority = None
+          base_fee = block.get('baseFeePerGas')
+          blob_gas_used = block.get('blobGasUsed')
+          excess_blob_gas = block.get('excessBlobGas')
+
+          result = {
+              'captured_at_unix': int(time.time()),
+              'network': network,
+              'native_symbol': os.environ['NATIVE_SYMBOL'],
+              'rpc': rpc,
+              'chain_id': int(w3.eth.chain_id),
+              'block_number': int(block['number']),
+              'block_timestamp': int(block['timestamp']),
+              'gas_limit': int(block['gasLimit']),
+              'gas_used': int(block['gasUsed']),
+              'gas_used_percent': float(int(block['gasUsed']) * 100 / int(block['gasLimit'])),
+              'gas_price_wei': gas_price,
+              'gas_price_gwei': gas_price / 1e9,
+              'base_fee_wei': int(base_fee) if base_fee is not None else None,
+              'base_fee_gwei': int(base_fee) / 1e9 if base_fee is not None else None,
+              'max_priority_fee_wei': priority,
+              'max_priority_fee_gwei': priority / 1e9 if priority is not None else None,
+              'blob_gas_used': int(blob_gas_used) if blob_gas_used is not None else None,
+              'excess_blob_gas': int(excess_blob_gas) if excess_blob_gas is not None else None,
+              'estimated_native_costs_at_rpc_gas_price': {
+                  '9m_gas': 9_000_000 * gas_price / 1e18,
+                  '15m_gas': 15_000_000 * gas_price / 1e18,
+                  '30m_gas': 30_000_000 * gas_price / 1e18,
+                  'full_latest_block_limit': int(block['gasLimit']) * gas_price / 1e18,
+              },
+          }
+          out = Path(f'gas-snapshot/{network}/snapshot.json')
+          out.write_text(json.dumps(result, indent=2), encoding='utf-8')
+          print(json.dumps(result, indent=2))
+          PY
+
+      - name: Upload gas snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-snapshot-${{ matrix.network }}
+          path: gas-snapshot/${{ matrix.network }}/snapshot.json
+          if-no-files-found: error
+          retention-days: 30
