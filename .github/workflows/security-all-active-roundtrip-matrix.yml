@@ -1,0 +1,96 @@
+name: Security exhaustive active DEX round-trip matrix
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - 'scripts/security/generate_all_active_roundtrip_test.py'
+      - '.github/workflows/security-all-active-roundtrip-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fork-search:
+    name: ${{ matrix.network }} active pools
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - network: mainnet
+            rpc: https://ethereum-rpc.publicnode.com
+          - network: arbitrum
+            rpc: https://arbitrum-one-rpc.publicnode.com
+          - network: base
+            rpc: https://base-rpc.publicnode.com
+          - network: polygon
+            rpc: https://polygon-bor-rpc.publicnode.com
+          - network: bnb
+            rpc: https://bsc-rpc.publicnode.com
+          - network: plasma
+            rpc: https://rpc.plasma.to
+    env:
+      NETWORK: ${{ matrix.network }}
+      RPC_URL: ${{ matrix.rpc }}
+    steps:
+      - name: Checkout audit branch with test dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install metadata dependencies
+        run: python -m pip install 'web3>=7,<8'
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Generate latest-state pool matrix
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/test evidence/${NETWORK}
+          python scripts/security/generate_all_active_roundtrip_test.py \
+            --network "${NETWORK}" \
+            --rpc "${RPC_URL}" \
+            --solidity-out audit/fork-poc/test/GeneratedAllActiveRoundTripSearch.t.sol \
+            --metadata-out evidence/${NETWORK}/active-pools.json \
+            | tee evidence/${NETWORK}/generation-summary.txt
+
+      - name: Run exhaustive closed-cycle search
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/fork-poc \
+            --via-ir \
+            --match-path test/GeneratedAllActiveRoundTripSearch.t.sol \
+            -vvvv 2>&1 | tee evidence/${NETWORK}/roundtrip-fork.log
+
+      - name: Extract candidate and failure summaries
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p evidence/${NETWORK}
+          grep -E "PoolBest\(|PoolNoClosedProfit\(|PoolSetupFailure\(|NetworkSummary\(|GENERATED|Suite result|Failing tests|Compiler run failed|Error:" \
+            evidence/${NETWORK}/roundtrip-fork.log \
+            evidence/${NETWORK}/generation-summary.txt \
+            2>/dev/null | tee evidence/${NETWORK}/roundtrip-summary.txt || true
+
+      - name: Upload per-network evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: active-roundtrip-${{ matrix.network }}
+          path: evidence/${{ matrix.network }}/
+          if-no-files-found: warn
+          retention-days: 30
