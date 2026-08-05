@@ -1,0 +1,119 @@
+name: Security staking reward accumulator wrap inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-staking-rpt-wrap-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MAINNET_RPC_URL: 'https://ethereum-rpc.publicnode.com'
+      ARBITRUM_RPC_URL: 'https://arbitrum-one-rpc.publicnode.com'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Query live staking contracts and calculate wrap horizons
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-staking-wrap
+          python3 - <<'PY'
+          import json, subprocess, time
+          from decimal import Decimal, getcontext
+          getcontext().prec = 100
+
+          contracts = [
+              ('mainnet-fUSDC', 'https://ethereum-rpc.publicnode.com', '0x2fA6c95B69c10f9F52b8990b6C03171F13C46225'),
+              ('mainnet-fUSDT', 'https://ethereum-rpc.publicnode.com', '0x490681095ed277B45377d28cA15Ac41d64583048'),
+              ('arbitrum-fUSDC', 'https://arbitrum-one-rpc.publicnode.com', '0x48f89d731C5e3b5BeE8235162FC2C639Ba62DB7d'),
+              ('arbitrum-fUSDT', 'https://arbitrum-one-rpc.publicnode.com', '0x65241f6cacde58c03400Cb84542a2c197d6dE9C3'),
+          ]
+
+          def cast(rpc, addr, sig):
+              out = subprocess.check_output(['cast','call',addr,sig,'--rpc-url',rpc], text=True).strip()
+              # cast can return `123 [1.23e2]`; first token is exact integer/address
+              return out.split()[0]
+
+          rows=[]
+          max128=2**128
+          for name,rpc,addr in contracts:
+              block=int(subprocess.check_output(['cast','block-number','--rpc-url',rpc],text=True).strip())
+              code=subprocess.check_output(['cast','code',addr,'--rpc-url',rpc],text=True).strip()
+              row={'name':name,'rpc':rpc,'address':addr,'block':block,'code_bytes':max(0,(len(code)-2)//2)}
+              for field,sig in [
+                  ('totalSupply','totalSupply()(uint256)'),
+                  ('rewardPerTokenStored','rewardPerTokenStored()(uint128)'),
+                  ('rewardPerTokenView','rewardPerToken()(uint256)'),
+                  ('rewardRate','rewardRate()(uint256)'),
+                  ('periodFinish','periodFinish()(uint256)'),
+                  ('lastUpdateTime','lastUpdateTime()(uint40)'),
+                  ('rewardsDuration','rewardsDuration()(uint256)'),
+                  ('stakingToken','stakingToken()(address)'),
+                  ('rewardsToken','rewardsToken()(address)'),
+              ]:
+                  try: row[field]=cast(rpc,addr,sig)
+                  except Exception as e: row[field]=f'ERROR:{e}'
+
+              for token_field in ['stakingToken','rewardsToken']:
+                  token=row.get(token_field,'')
+                  if isinstance(token,str) and token.startswith('0x'):
+                      try: row[token_field+'Decimals']=int(cast(rpc,token,'decimals()(uint8)'))
+                      except Exception: row[token_field+'Decimals']=None
+                      try: row[token_field+'BalanceAtContract']=int(cast(rpc,token,f'balanceOf(address)(uint256) {addr}'))
+                      except Exception: row[token_field+'BalanceAtContract']=None
+
+              numeric_ok=all(str(row.get(k,'')).isdigit() for k in ['totalSupply','rewardPerTokenStored','rewardRate','periodFinish'])
+              if numeric_ok:
+                  supply=int(row['totalSupply']); stored=int(row['rewardPerTokenStored']); rate=int(row['rewardRate']); finish=int(row['periodFinish'])
+                  now=int(time.time())
+                  remaining=max(0,finish-now)
+                  headroom=(max128-stored) % max128
+                  if supply>0 and rate>0:
+                      seconds_to_wrap=Decimal(headroom)*Decimal(supply)/(Decimal(rate)*Decimal(10**18))
+                      row['secondsToWrapAtCurrentSupply']=str(seconds_to_wrap)
+                      row['yearsToWrapAtCurrentSupply']=str(seconds_to_wrap/Decimal('31557600'))
+                      row['projectedIncrementRemaining']=str(Decimal(remaining)*Decimal(rate)*Decimal(10**18)/Decimal(supply))
+                      row['wrapBeforePeriodFinish']=Decimal(remaining)*Decimal(rate)*Decimal(10**18) >= Decimal(headroom)*Decimal(supply)
+                      # Supply at or below this threshold would wrap during the remaining active period.
+                      if headroom>0:
+                          row['maxSupplyRawForWrapBeforeFinish']=str((remaining*rate*10**18)//headroom)
+                      else:
+                          row['maxSupplyRawForWrapBeforeFinish']='0'
+                  else:
+                      row['secondsToWrapAtCurrentSupply']=None
+                      row['yearsToWrapAtCurrentSupply']=None
+                      row['projectedIncrementRemaining']='0'
+                      row['wrapBeforePeriodFinish']=False
+                      row['maxSupplyRawForWrapBeforeFinish']='0'
+              rows.append(row)
+
+          with open('evidence-staking-wrap/live-inventory.json','w') as f: json.dump(rows,f,indent=2)
+          with open('evidence-staking-wrap/live-inventory.txt','w') as f:
+              for r in rows:
+                  f.write(json.dumps(r,sort_keys=True)+'\n')
+                  print(json.dumps(r,sort_keys=True))
+          PY
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staking-rpt-wrap-inventory
+          path: evidence-staking-wrap/
+          if-no-files-found: error
+          retention-days: 30
