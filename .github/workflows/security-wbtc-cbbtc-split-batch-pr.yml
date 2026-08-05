@@ -1,0 +1,54 @@
+name: Security WBTC-cbBTC split-batch amplification
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  split-batch-fork-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+    steps:
+      - name: Checkout with test dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated fork harness
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/src audit/fork-poc/test
+          cp test/security/WbtcCbbtcSplitBatchAmplification.t.sol audit/fork-poc/test/
+      - name: Run deployed split-batch amplification search
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/fork-poc \
+            --via-ir \
+            --match-path test/WbtcCbbtcSplitBatchAmplification.t.sol \
+            -vvvv 2>&1 | tee wbtc-cbbtc-split-batch.log
+      - name: Extract proof summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "SplitBatch(Result|Revert)\(|Suite result|Ran [0-9]+ test|Failing tests" \
+            wbtc-cbbtc-split-batch.log | tee wbtc-cbbtc-split-batch-summary.log || true
+      - name: Upload fork evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wbtc-cbbtc-split-batch-log
+          path: |
+            wbtc-cbbtc-split-batch.log
+            wbtc-cbbtc-split-batch-summary.log
+          if-no-files-found: error
