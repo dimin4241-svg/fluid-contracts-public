@@ -41,6 +41,7 @@ jobs:
         run: |
           mkdir -p audit/dexlite-amplification/test audit/dexlite-amplification/src audit/dexlite-amplification/lib evidence-dexlite-amplification
           cp test/security/DexLiteCycleAmplificationSearch.t.sol audit/dexlite-amplification/test/
+          sed -i 's/0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/g' audit/dexlite-amplification/test/DexLiteCycleAmplificationSearch.t.sol
           ln -s "$GITHUB_WORKSPACE/lib/forge-std" audit/dexlite-amplification/lib/forge-std
           cat > audit/dexlite-amplification/foundry.toml <<'EOF'
           [profile.default]
