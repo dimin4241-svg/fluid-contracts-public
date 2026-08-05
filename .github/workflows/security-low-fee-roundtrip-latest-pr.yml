@@ -1,0 +1,59 @@
+name: Security low-fee exact-output latest-state fork PoC
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fork-poc-latest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+    steps:
+      - name: Checkout with test dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated latest-state fork harness
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/src audit/fork-poc/test
+          cp test/security/LowFeeExactOutRoundTrip.t.sol audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol')
+          s = p.read_text()
+          s = s.replace('0x91716c4eda1fb55e84bf8b4c7085f84285c19085', '0x91716C4EDA1Fb55e84Bf8b4c7085f84285c19085')
+          s = s.replace('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE')
+          s = s.replace('vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), FORK_BLOCK);', 'vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));')
+          s = s.replace('snapshotState()', 'snapshot()').replace('revertToState', 'revertTo')
+          s = s.replace('10 ** 36', '10 ** 24')
+          # Native-token candidates are already skipped. Keep both ERC20 directions and both balances funded.
+          p.write_text(s)
+          PY
+      - name: Run latest-state closed-loop extraction search
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/fork-poc \
+            --match-path test/LowFeeExactOutRoundTrip.t.sol \
+            --match-test test_statefulRoundTripSearchOnEveryActiveLowFeePool \
+            -vvvv 2>&1 | tee low-fee-roundtrip-latest-fork.log
+      - name: Upload PoC log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: low-fee-roundtrip-latest-fork-log
+          path: low-fee-roundtrip-latest-fork.log
+          if-no-files-found: warn
