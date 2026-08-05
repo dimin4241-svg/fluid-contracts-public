@@ -1,0 +1,73 @@
+name: Security all reward deployments inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-all-reward-deployments-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract deployment inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-all-rewards
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, re
+          rows=[]
+          for p in Path('deployments').rglob('*.json'):
+              n=p.name.lower()
+              if 'vaultrewards' not in n and 'borrowrewards' not in n:
+                  continue
+              try:
+                  data=json.loads(p.read_text(errors='replace'))
+              except Exception:
+                  continue
+              addr=data.get('address')
+              if not isinstance(addr,str):
+                  continue
+              parts=p.parts
+              chain=parts[1] if len(parts)>1 else 'unknown'
+              rows.append({
+                  'chain':chain,
+                  'kind':'BorrowRewards' if 'borrowrewards' in n else 'VaultRewards',
+                  'name':p.stem,
+                  'address':addr,
+                  'path':str(p),
+              })
+          # de-duplicate addresses while retaining all aliases
+          by={}
+          for r in rows:
+              k=(r['chain'],r['address'].lower())
+              if k not in by: by[k]={**r,'aliases':[r['path']]}
+              elif r['path'] not in by[k]['aliases']: by[k]['aliases'].append(r['path'])
+          out=sorted(by.values(),key=lambda x:(x['chain'],x['kind'],x['name']))
+          Path('evidence-all-rewards/deployments.json').write_text(json.dumps(out,indent=2))
+          Path('evidence-all-rewards/deployments.tsv').write_text(
+              'chain\tkind\tname\taddress\taliases\n' +
+              ''.join(f"{r['chain']}\t{r['kind']}\t{r['name']}\t{r['address']}\t{'|'.join(r['aliases'])}\n" for r in out)
+          )
+          print('unique deployments',len(out))
+          for r in out: print(json.dumps(r,sort_keys=True))
+          PY
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-reward-deployments-inventory
+          path: evidence-all-rewards/
+          if-no-files-found: error
+          retention-days: 30
