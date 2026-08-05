@@ -1,0 +1,81 @@
+name: Security DexLite zero-capital cycle execution
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - 'test/security/DexLiteZeroCapitalCycleExecution.t.sol'
+      - '.github/workflows/security-dexlite-zero-capital-cycle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+    steps:
+      - name: Checkout with dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Ethereum block
+        shell: bash
+        run: |
+          MAINNET_FORK_BLOCK="$(cast block-number --rpc-url "$MAINNET_RPC_URL")"
+          echo "MAINNET_FORK_BLOCK=$MAINNET_FORK_BLOCK" >> "$GITHUB_ENV"
+          echo "Fork block: $MAINNET_FORK_BLOCK"
+
+      - name: Prepare isolated harness
+        shell: bash
+        run: |
+          mkdir -p audit/dexlite-execution/test audit/dexlite-execution/src audit/dexlite-execution/lib evidence-dexlite-execution
+          cp test/security/DexLiteZeroCapitalCycleExecution.t.sol audit/dexlite-execution/test/
+          ln -s "$GITHUB_WORKSPACE/lib/forge-std" audit/dexlite-execution/lib/forge-std
+          cat > audit/dexlite-execution/foundry.toml <<'EOF'
+          [profile.default]
+          src = "src"
+          test = "test"
+          libs = ["lib"]
+          solc_version = "0.8.29"
+          evm_version = "cancun"
+          optimizer = true
+          optimizer_runs = 200
+          via_ir = true
+          EOF
+
+      - name: Execute zero-capital repeated-pool cycles
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/dexlite-execution \
+            --match-path test/DexLiteZeroCapitalCycleExecution.t.sol \
+            -vvvv 2>&1 | tee evidence-dexlite-execution/execution.log
+
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(ExecutedCycle|ExecutionSummary|successful profitable rounds|total attacker USDe gain|total DexLite USDe loss|first round gain|last round gain|Suite result|Failing tests|Error:)" \
+            evidence-dexlite-execution/execution.log \
+            | tee evidence-dexlite-execution/execution-summary.log || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dexlite-zero-capital-cycle-execution
+          path: evidence-dexlite-execution/
+          if-no-files-found: error
+          retention-days: 30
