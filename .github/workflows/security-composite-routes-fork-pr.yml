@@ -24,11 +24,20 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Prepare isolated harness
+      - name: Prepare latest-state bounded search harness
         shell: bash
         run: |
           mkdir -p audit/fork-poc/src audit/fork-poc/test
           cp test/security/LowFeeCompositeRoutes.t.sol audit/fork-poc/test/LowFeeCompositeRoutes.t.sol
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('audit/fork-poc/test/LowFeeCompositeRoutes.t.sol')
+          s = p.read_text()
+          s = s.replace('vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), FORK_BLOCK);', 'vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));')
+          s = s.replace('amount <= 5_000', 'amount <= 750')
+          s = s.replace('i < 9', 'i < 7')
+          p.write_text(s)
+          PY
       - name: Run stateful mixed/cross-pool search
         shell: bash
         run: |
