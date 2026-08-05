@@ -1,0 +1,76 @@
+name: Security live rebalancer discovery
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-live-rebalancer-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RPC_URL: 'https://ethereum-rpc.publicnode.com'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Discover handler callers through Blockscout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-live-rebalancers
+          python3 - <<'PY'
+          import json, urllib.request, subprocess
+          reserve='0x264786EF916af64a1DB19F513F24a3681734ce92'
+          rpc='https://ethereum-rpc.publicnode.com'
+          handlers=[
+            '0x49EF1B3230a8d2AC7205E808dF5859f1b94D61Df',
+            '0x65454D16A39c7b5b52A67116FC1cf0a5e5942EFd',
+            '0xc5ba4D4142Ae5cf9ec802B298963A08390658f05',
+            '0xD43d85f4F4eEDdA3ed3BbE2Ca7351eE32b8bB44a',
+            '0x1FAf33c33ce81DC86fe50ba5b6F3417aBEC01d6E',
+            '0xB5af15a931dA1B1a7B8DCF6E2Cd31C8a3Dd1E134',
+            '0x383683D4414Fc27CC9669b7Cc6c7067716814b6a'
+          ]
+          candidates={}; pages={}
+          for h in handlers:
+            url=f'https://eth.blockscout.com/api/v2/addresses/{h}/transactions'
+            req=urllib.request.Request(url,headers={'User-Agent':'fluid-security-audit/1.0'})
+            try:
+              data=json.load(urllib.request.urlopen(req,timeout=30))
+            except Exception as e:
+              pages[h]={'error':repr(e)}; continue
+            pages[h]={'count':len(data.get('items',[]))}
+            for tx in data.get('items',[]):
+              frm=(tx.get('from') or {}).get('hash')
+              if frm:
+                candidates.setdefault(frm.lower(),[]).append({'handler':h,'tx':tx.get('hash'),'method':tx.get('method'),'status':tx.get('status')})
+          out=[]
+          for a,txs in candidates.items():
+            try:
+              value=subprocess.check_output(['cast','call',reserve,f'isRebalancer(address)(bool) {a}','--rpc-url',rpc],text=True).strip()
+            except Exception as e:
+              value='ERROR:'+repr(e)
+            out.append({'address':a,'isRebalancer':value.lower().startswith('true'),'calls':txs})
+          result={'pages':pages,'candidates':sorted(out,key=lambda x:(not x['isRebalancer'],x['address']))}
+          open('evidence-live-rebalancers/discovery.json','w').write(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          PY
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-rebalancer-discovery
+          path: evidence-live-rebalancers/
+          if-no-files-found: error
+          retention-days: 30
