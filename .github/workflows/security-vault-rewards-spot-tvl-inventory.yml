@@ -1,0 +1,86 @@
+name: Security VaultRewards spot-TVL inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-vault-rewards-spot-tvl-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RPC_URL: 'https://ethereum-rpc.publicnode.com'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Query live rewards state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-vault-rewards
+          python3 - <<'PY'
+          import json, subprocess, time
+
+          rpc='https://ethereum-rpc.publicnode.com'
+          contracts=[
+            ('ETH-USDT','0xB36Db4dfF978D2d552a5149E2fd0FBefA2a32809'),
+            ('ETH-USDC','0x58Dc7894a7B1B9D065CE2e94a73f62686B439A2A'),
+            ('WBTC-USDT','0xbA379AfC2829CbF5DeA14B8bc135a820e144456D'),
+            ('WBTC-USDC','0x4605FC1E6A49D92D97179407E823023F06D5aA0e'),
+          ]
+          def call(addr,sig):
+            out=subprocess.check_output(['cast','call',addr,sig,'--rpc-url',rpc],text=True,stderr=subprocess.STDOUT).strip()
+            return out.split()[0]
+          rows=[]
+          now=int(time.time())
+          block=int(subprocess.check_output(['cast','block-number','--rpc-url',rpc],text=True).strip())
+          for name,addr in contracts:
+            r={'name':name,'address':addr,'block':block,'now':now}
+            for key,sig in [
+              ('ended','ended()(bool)'),('startTime','startTime()(uint40)'),('endTime','endTime()(uint40)'),
+              ('duration','duration()(uint40)'),('nextDuration','nextDuration()(uint40)'),
+              ('rewardsAmount','rewardsAmount()(uint128)'),('nextRewardsAmount','nextRewardsAmount()(uint128)'),
+              ('rewardsAmountPerYear','rewardsAmountPerYear()(uint256)'),
+              ('currentMagnifier','currentMagnifier()(uint256)'),('vaultTVL','vaultTVL()(uint256)'),
+              ('supplyRate','getSupplyRate()(uint256)'),('vault','VAULT()(address)'),
+              ('collateralToken','VAULT_COLLATERAL_TOKEN()(address)'),('reserve','RESERVE_CONTRACT()(address)'),
+              ('initiator','INITIATOR()(address)'),('governance','GOVERNANCE()(address)')
+            ]:
+              try: r[key]=call(addr,sig)
+              except subprocess.CalledProcessError as e: r[key]='ERROR:'+e.output[-500:]
+            try:
+              out=subprocess.check_output(['cast','call',addr,'calculateMagnifier()((uint256,bool))','--rpc-url',rpc],text=True,stderr=subprocess.STDOUT).strip()
+              r['calculateMagnifierRaw']=out
+            except subprocess.CalledProcessError as e:
+              r['calculateMagnifierRaw']='ERROR:'+e.output[-500:]
+            token=r.get('collateralToken','')
+            if isinstance(token,str) and token.startswith('0x'):
+              for key,sig in [('decimals','decimals()(uint8)'),('symbol','symbol()(string)')]:
+                try: r['collateral'+key.capitalize()]=call(token,sig)
+                except Exception: pass
+            rows.append(r)
+          open('evidence-vault-rewards/live-state.json','w').write(json.dumps(rows,indent=2))
+          for r in rows: print(json.dumps(r,sort_keys=True))
+          PY
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-rewards-spot-tvl-inventory
+          path: evidence-vault-rewards/
+          if-no-files-found: error
+          retention-days: 30
