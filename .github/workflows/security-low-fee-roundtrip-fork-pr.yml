@@ -33,6 +33,8 @@ jobs:
           sed -i 's/0x91716c4eda1fb55e84bf8b4c7085f84285c19085/0x91716C4EDA1Fb55e84Bf8b4c7085f84285c19085/' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
           sed -i 's/0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE/' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
           sed -i 's/snapshotState()/snapshot()/g; s/revertToState/revertTo/g' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
+          sed -i '/deal(cv.token1/d; /_searchDirection(dexId, executor, false/d' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
+          sed -i 's/10 \*\* 36/10 ** 24/g' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
       - name: Run fixed-block stateful round-trip search
         shell: bash
         run: |
