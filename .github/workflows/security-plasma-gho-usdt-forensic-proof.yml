@@ -34,10 +34,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence-plasma-forensic audit/fork-poc/test
+          exec > >(tee -a evidence-plasma-forensic/setup.log) 2>&1
           LATEST="$(cast block-number --rpc-url "${PLASMA_RPC_URL}")"
           GAS_PRICE="$(cast gas-price --rpc-url "${PLASMA_RPC_URL}")"
           HOLDER_BALANCE="$(cast call "${USDT0}" 'balanceOf(address)(uint256)' "${USDT0_LIVE_HOLDER}" --block "${LATEST}" --rpc-url "${PLASMA_RPC_URL}")"
-          BLOCK_GAS_LIMIT="$(cast block "${LATEST}" gasLimit --rpc-url "${PLASMA_RPC_URL}")"
+          cast block "${LATEST}" --json --rpc-url "${PLASMA_RPC_URL}" \
+            > evidence-plasma-forensic/fork-block.json
+          BLOCK_GAS_LIMIT="$(python - <<'PY'
+          import json
+          value = json.load(open('evidence-plasma-forensic/fork-block.json'))['gasLimit']
+          print(int(value, 16) if isinstance(value, str) and value.startswith('0x') else int(value))
+          PY
+          )"
           {
             echo "PLASMA_FORK_BLOCK=${LATEST}"
             echo "PLASMA_GAS_PRICE_WEI=${GAS_PRICE}"
@@ -49,8 +57,6 @@ jobs:
             echo "live_holder=${USDT0_LIVE_HOLDER}"
             echo "live_holder_usdt0_raw=${HOLDER_BALANCE}"
           } | tee evidence-plasma-forensic/deployed-state.txt
-          cast block "${LATEST}" --json --rpc-url "${PLASMA_RPC_URL}" \
-            > evidence-plasma-forensic/fork-block.json
 
       - name: Prepare isolated harness
         shell: bash
