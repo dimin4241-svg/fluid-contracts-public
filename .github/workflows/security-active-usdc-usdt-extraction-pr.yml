@@ -1,0 +1,46 @@
+name: Security deployed USDC-USDT extraction proof
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployed-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+    steps:
+      - name: Checkout with dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated harness
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/src audit/fork-poc/test
+          cp test/security/ActiveUsdcUsdtRoundingExtraction.t.sol audit/fork-poc/test/ActiveUsdcUsdtRoundingExtraction.t.sol
+      - name: Run deployed closed-loop and repetition proofs
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/fork-poc \
+            --match-path test/ActiveUsdcUsdtRoundingExtraction.t.sol \
+            -vvvv 2>&1 | tee active-usdc-usdt-extraction.log
+      - name: Upload proof log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: active-usdc-usdt-extraction-log
+          path: active-usdc-usdt-extraction.log
+          if-no-files-found: error
