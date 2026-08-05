@@ -1,0 +1,67 @@
+name: Security DexLite repeated-pool cycle probe
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - 'test/security/DexLiteRepeatedPoolCycleProbe.t.sol'
+      - '.github/workflows/security-dexlite-repeated-cycle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+    steps:
+      - name: Checkout probe branch with dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Ethereum block
+        shell: bash
+        run: |
+          echo "MAINNET_FORK_BLOCK=$(cast block-number --rpc-url \"$MAINNET_RPC_URL\")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated probe harness
+        shell: bash
+        run: |
+          mkdir -p audit/dexlite-cycle/test evidence-dexlite-cycle
+          cp test/security/DexLiteRepeatedPoolCycleProbe.t.sol audit/dexlite-cycle/test/
+
+      - name: Run repeated-pool cycle matrix
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/dexlite-cycle \
+            --match-path test/DexLiteRepeatedPoolCycleProbe.t.sol \
+            -vvvv 2>&1 | tee evidence-dexlite-cycle/dexlite-cycle.log
+
+      - name: Extract evidence summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(DexInventory|BestCycle|global best gross delta|live dex count|valid cycle quotes|Suite result|Failing tests|Error:)" \
+            evidence-dexlite-cycle/dexlite-cycle.log \
+            | tee evidence-dexlite-cycle/dexlite-cycle-summary.log || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dexlite-repeated-pool-cycle-probe
+          path: evidence-dexlite-cycle/
+          if-no-files-found: error
+          retention-days: 30
