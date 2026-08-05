@@ -1,0 +1,96 @@
+name: Security mainnet split-batch shards
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - 'scripts/security/generate_split_batch_shard.py'
+      - '.github/workflows/security-mainnet-split-batch-shards.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shard:
+    name: mainnet DEX ${{ matrix.dex_min }}-${{ matrix.dex_max }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dex_min: 1
+            dex_max: 16
+          - dex_min: 17
+            dex_max: 32
+          - dex_min: 33
+            dex_max: 48
+    env:
+      NETWORK: mainnet
+      RPC_URL: https://ethereum-rpc.publicnode.com
+      DEX_MIN: ${{ matrix.dex_min }}
+      DEX_MAX: ${{ matrix.dex_max }}
+    steps:
+      - name: Checkout audit branch with test dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install metadata dependencies
+        run: python -m pip install 'web3>=7,<8'
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Generate bounded latest-state shard
+        shell: bash
+        run: |
+          DIR=evidence-mainnet-shards/${DEX_MIN}-${DEX_MAX}
+          mkdir -p audit/fork-poc/test "$DIR"
+          python scripts/security/generate_split_batch_shard.py \
+            --network mainnet \
+            --rpc "$RPC_URL" \
+            --dex-min "$DEX_MIN" \
+            --dex-max "$DEX_MAX" \
+            --solidity-out audit/fork-poc/test/GeneratedAllActiveSplitBatchSearch.t.sol \
+            --metadata-out "$DIR/active-pools.json" \
+            | tee "$DIR/generation-summary.txt"
+
+      - name: Run bounded split-batch search
+        shell: bash
+        run: |
+          set -o pipefail
+          DIR=evidence-mainnet-shards/${DEX_MIN}-${DEX_MAX}
+          forge test \
+            --root audit/fork-poc \
+            --via-ir \
+            --match-path test/GeneratedAllActiveSplitBatchSearch.t.sol \
+            -vvvv 2>&1 | tee "$DIR/split-batch-fork.log"
+
+      - name: Extract shard summary
+        if: always()
+        shell: bash
+        run: |
+          DIR=evidence-mainnet-shards/${DEX_MIN}-${DEX_MAX}
+          mkdir -p "$DIR"
+          grep -E "SplitBatchBest\(|SplitBatchNoProfit\(|SplitBatchSetupFailure\(|SplitBatchNetworkSummary\(|GENERATED_SPLIT_SHARD|Suite result|Failing tests|OutOfGas|Error:" \
+            "$DIR/split-batch-fork.log" "$DIR/generation-summary.txt" \
+            2>/dev/null | tee "$DIR/split-batch-summary.txt" || true
+
+      - name: Upload mainnet shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mainnet-split-batch-${{ matrix.dex_min }}-${{ matrix.dex_max }}
+          path: evidence-mainnet-shards/${{ matrix.dex_min }}-${{ matrix.dex_max }}/
+          if-no-files-found: warn
+          retention-days: 30
