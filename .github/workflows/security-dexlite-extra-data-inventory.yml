@@ -1,0 +1,64 @@
+name: Security DexLite extra-data inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-dexlite-extra-data-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+      DEX_LITE: 0xBbcb91440523216e2b87052A99F69c604A7b6e00
+      EXTRA_DATA_SLOT: 0x7e8134afb5ed35d36cb65e24b9a4712a52bb77d952806c1acf50970d2107797f
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Inspect live module
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-dexlite-extra
+          BLOCK="$(cast block-number --rpc-url "$MAINNET_RPC_URL")"
+          RAW="$(cast storage "$DEX_LITE" "$EXTRA_DATA_SLOT" --rpc-url "$MAINNET_RPC_URL" --block "$BLOCK")"
+          MODULE="0x${RAW:26:40}"
+          CODE="$(cast code "$MODULE" --rpc-url "$MAINNET_RPC_URL" --block "$BLOCK")"
+          CODEHASH="$(cast codehash "$MODULE" --rpc-url "$MAINNET_RPC_URL" --block "$BLOCK")"
+          {
+            echo "block=$BLOCK"
+            echo "dexLite=$DEX_LITE"
+            echo "slot=$EXTRA_DATA_SLOT"
+            echo "raw=$RAW"
+            echo "module=$MODULE"
+            echo "codehash=$CODEHASH"
+            echo "code_bytes=$(( (${#CODE} - 2) / 2 ))"
+            echo "code=$CODE"
+          } | tee evidence-dexlite-extra/inventory.txt
+
+          if [[ "$MODULE" != "0x0000000000000000000000000000000000000000" && "$CODE" != "0x" ]]; then
+            cast selectors "$CODE" | tee evidence-dexlite-extra/selectors.txt || true
+            cast disassemble "$CODE" > evidence-dexlite-extra/disassembly.txt || true
+          fi
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dexlite-extra-data-inventory
+          path: evidence-dexlite-extra/
+          if-no-files-found: error
+          retention-days: 30
