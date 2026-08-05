@@ -54,3 +54,4 @@ def main():
     print(json.dumps(out,indent=2))
     return 2 if failures else (10 if out['nonzero'] else 0)
 if __name__=='__main__': sys.exit(main())
+# automation refresh 2026-08-05T20:53Z
