@@ -32,13 +32,27 @@ jobs:
       - name: Resolve fresh Ethereum block
         shell: bash
         run: |
-          echo "MAINNET_FORK_BLOCK=$(cast block-number --rpc-url \"$MAINNET_RPC_URL\")" >> "$GITHUB_ENV"
+          MAINNET_FORK_BLOCK="$(cast block-number --rpc-url "$MAINNET_RPC_URL")"
+          test -n "$MAINNET_FORK_BLOCK"
+          echo "MAINNET_FORK_BLOCK=$MAINNET_FORK_BLOCK" >> "$GITHUB_ENV"
+          echo "Fork block: $MAINNET_FORK_BLOCK"
 
       - name: Prepare isolated probe harness
         shell: bash
         run: |
-          mkdir -p audit/dexlite-cycle/test evidence-dexlite-cycle
+          mkdir -p audit/dexlite-cycle/test audit/dexlite-cycle/src audit/dexlite-cycle/lib evidence-dexlite-cycle
           cp test/security/DexLiteRepeatedPoolCycleProbe.t.sol audit/dexlite-cycle/test/
+          ln -s "$GITHUB_WORKSPACE/lib/forge-std" audit/dexlite-cycle/lib/forge-std
+          cat > audit/dexlite-cycle/foundry.toml <<'EOF'
+          [profile.default]
+          src = "src"
+          test = "test"
+          libs = ["lib"]
+          solc_version = "0.8.29"
+          evm_version = "cancun"
+          optimizer = true
+          optimizer_runs = 200
+          EOF
 
       - name: Run repeated-pool cycle matrix
         shell: bash
