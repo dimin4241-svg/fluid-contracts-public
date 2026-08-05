@@ -54,7 +54,7 @@ contract CompositeRouteExecutor {
         uint256 before0 = IERC20Route(token0).balanceOf(address(this));
         uint256 before1 = IERC20Route(token1).balanceOf(address(this));
         amountOut1 = IFluidDexRoute(poolA).swapIn(true, amountIn0, 0, address(this));
-        amountIn1 = IFluidDexRoute(poolB).swapOut(false, amountIn0, type(uint256).max, address(this));
+        amountIn1 = IFluidDexRoute(poolB).swapOut(false, amountIn0, amountOut1, address(this));
         delta0 = int256(IERC20Route(token0).balanceOf(address(this))) - int256(before0);
         delta1 = int256(IERC20Route(token1).balanceOf(address(this))) - int256(before1);
     }
