@@ -31,29 +31,30 @@ contract TriangleExecutor {
         IERC20Tri(USDE).approve(address(USDE_USDT), type(uint256).max);
     }
 
-    // USDT0 -> GHO via repeated exact-output, then exact-input through GHO->USDe->USDT0.
-    function routeA(uint256 rounds, uint256 ghoOutEach) external returns (int256 usdtDelta, int256 ghoDelta, int256 usdeDelta) {
+    function route(uint8 which, uint256 rounds, uint256 amountOutEach)
+        external returns (int256 usdtDelta, int256 ghoDelta, int256 usdeDelta)
+    {
+        require(which == 1 || which == 2, "route");
         uint256 u0 = IERC20Tri(USDT0).balanceOf(address(this));
         uint256 g0 = IERC20Tri(GHO).balanceOf(address(this));
         uint256 e0 = IERC20Tri(USDE).balanceOf(address(this));
-        for (uint256 i; i < rounds; ++i) GHO_USDT.swapOut(false, ghoOutEach, type(uint256).max, address(this));
-        uint256 g = IERC20Tri(GHO).balanceOf(address(this)) - g0;
-        uint256 e = USDE_GHO.swapIn(false, g, 0, address(this));
-        USDE_USDT.swapIn(true, e, 0, address(this));
-        usdtDelta = int256(IERC20Tri(USDT0).balanceOf(address(this))) - int256(u0);
-        ghoDelta = int256(IERC20Tri(GHO).balanceOf(address(this))) - int256(g0);
-        usdeDelta = int256(IERC20Tri(USDE).balanceOf(address(this))) - int256(e0);
-    }
 
-    // USDT0 -> USDe via repeated exact-output, then exact-input through USDe->GHO->USDT0.
-    function routeB(uint256 rounds, uint256 usdeOutEach) external returns (int256 usdtDelta, int256 ghoDelta, int256 usdeDelta) {
-        uint256 u0 = IERC20Tri(USDT0).balanceOf(address(this));
-        uint256 g0 = IERC20Tri(GHO).balanceOf(address(this));
-        uint256 e0 = IERC20Tri(USDE).balanceOf(address(this));
-        for (uint256 i; i < rounds; ++i) USDE_USDT.swapOut(false, usdeOutEach, type(uint256).max, address(this));
-        uint256 e = IERC20Tri(USDE).balanceOf(address(this)) - e0;
-        uint256 g = USDE_GHO.swapIn(true, e, 0, address(this));
-        GHO_USDT.swapIn(true, g, 0, address(this));
+        if (which == 1) {
+            for (uint256 i; i < rounds; ++i) {
+                GHO_USDT.swapOut(false, amountOutEach, type(uint256).max, address(this));
+            }
+            uint256 g = IERC20Tri(GHO).balanceOf(address(this)) - g0;
+            uint256 e = USDE_GHO.swapIn(false, g, 0, address(this));
+            USDE_USDT.swapIn(true, e, 0, address(this));
+        } else {
+            for (uint256 i; i < rounds; ++i) {
+                USDE_USDT.swapOut(false, amountOutEach, type(uint256).max, address(this));
+            }
+            uint256 e = IERC20Tri(USDE).balanceOf(address(this)) - e0;
+            uint256 g = USDE_GHO.swapIn(true, e, 0, address(this));
+            GHO_USDT.swapIn(true, g, 0, address(this));
+        }
+
         usdtDelta = int256(IERC20Tri(USDT0).balanceOf(address(this))) - int256(u0);
         ghoDelta = int256(IERC20Tri(GHO).balanceOf(address(this))) - int256(g0);
         usdeDelta = int256(IERC20Tri(USDE).balanceOf(address(this))) - int256(e0);
@@ -98,7 +99,7 @@ contract PlasmaStableTriangleSearchTest is Test {
         uint256 bestAmount;
         uint256 bestGas;
 
-        for (uint8 route = 1; route <= 2; ++route) {
+        for (uint8 routeId = 1; routeId <= 2; ++routeId) {
             for (uint256 ri; ri < 8; ++ri) {
                 for (uint256 ai; ai < 18; ++ai) {
                     uint256 snap = vm.snapshot();
@@ -107,11 +108,17 @@ contract PlasmaStableTriangleSearchTest is Test {
                     deal(GHO, address(ex), 0);
                     deal(USDE, address(ex), 0);
                     uint256 gasBefore = gasleft();
-                    try route == 1 ? ex.routeA(_rounds(ri), _amount(ai)) : ex.routeB(_rounds(ri), _amount(ai)) returns (int256 u, int256 g, int256 e) {
+                    try ex.route(routeId, _rounds(ri), _amount(ai)) returns (int256 u, int256 g, int256 e) {
                         uint256 used = gasBefore - gasleft();
                         int256 p = _parity(u, g, e);
-                        emit TriangleCandidate(route, _rounds(ri), _amount(ai), u, g, e, used);
-                        if (p > best) { best = p; bestRoute = route; bestRounds = _rounds(ri); bestAmount = _amount(ai); bestGas = used; }
+                        emit TriangleCandidate(routeId, _rounds(ri), _amount(ai), u, g, e, used);
+                        if (p > best) {
+                            best = p;
+                            bestRoute = routeId;
+                            bestRounds = _rounds(ri);
+                            bestAmount = _amount(ai);
+                            bestGas = used;
+                        }
                     } catch {}
                     require(vm.revertTo(snap), "restore");
                 }
