@@ -111,7 +111,7 @@ contract DexLiteZeroCapitalCycleExecutionTest is Test {
         uint256 lastRoundGain;
 
         for (uint256 i; i < MAX_ROUNDS; ++i) {
-            uint256 snapshot = vm.snapshotState();
+            uint256 snapshot = vm.snapshot();
             uint256 attackerBefore = usde.balanceOf(address(executor));
             uint256 dexBefore = usde.balanceOf(DEX_LITE);
 
@@ -122,7 +122,7 @@ contract DexLiteZeroCapitalCycleExecutionTest is Test {
                 uint256 loss = dexBefore > dexAfter ? dexBefore - dexAfter : 0;
 
                 if (gain == 0 || loss != gain) {
-                    vm.revertToState(snapshot);
+                    vm.revertTo(snapshot);
                     break;
                 }
 
@@ -131,7 +131,7 @@ contract DexLiteZeroCapitalCycleExecutionTest is Test {
                 lastRoundGain = gain;
                 emit ExecutedCycle(i, requiredInput, gain, loss);
             } catch {
-                vm.revertToState(snapshot);
+                vm.revertTo(snapshot);
                 break;
             }
         }
