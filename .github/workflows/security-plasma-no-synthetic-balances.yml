@@ -1,0 +1,78 @@
+name: Security Plasma no-synthetic-balance extraction proof
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - 'test/security/PlasmaGhoUsdtNoSyntheticBalances.t.sol'
+      - '.github/workflows/security-plasma-no-synthetic-balances.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PLASMA_RPC_URL: 'https://rpc.plasma.to'
+      USDT0: '0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb'
+      LIVE_HOLDER: '0x8741B106e9738a6971AD07DABCFe95FF66337b51'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Pin latest deployed state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit/fork-poc/test evidence-plasma-no-synthetic
+          BLOCK="$(cast block-number --rpc-url "${PLASMA_RPC_URL}")"
+          GAS_PRICE="$(cast gas-price --rpc-url "${PLASMA_RPC_URL}")"
+          HOLDER_BALANCE="$(cast call "${USDT0}" 'balanceOf(address)(uint256)' "${LIVE_HOLDER}" --block "${BLOCK}" --rpc-url "${PLASMA_RPC_URL}")"
+          cast block "${BLOCK}" --json --rpc-url "${PLASMA_RPC_URL}" > evidence-plasma-no-synthetic/fork-block.json
+          {
+            echo "PLASMA_FORK_BLOCK=${BLOCK}"
+            echo "PLASMA_GAS_PRICE_WEI=${GAS_PRICE}"
+          } >> "${GITHUB_ENV}"
+          {
+            echo "fork_block=${BLOCK}"
+            echo "gas_price_wei=${GAS_PRICE}"
+            echo "live_holder=${LIVE_HOLDER}"
+            echo "live_holder_usdt0_raw=${HOLDER_BALANCE}"
+          } | tee evidence-plasma-no-synthetic/deployed-state.txt
+
+      - name: Prepare isolated harness
+        run: cp test/security/PlasmaGhoUsdtNoSyntheticBalances.t.sol audit/fork-poc/test/
+
+      - name: Run minimal deployed fork proof
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/fork-poc --via-ir \
+            --match-path test/PlasmaGhoUsdtNoSyntheticBalances.t.sol \
+            -vvvv 2>&1 | tee evidence-plasma-no-synthetic/proof.log
+
+      - name: Extract evidence summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E 'ExistingTokenFunding\(|NoSyntheticExtraction\(|Suite result|Failing tests|Compiler run failed|Error:' \
+            evidence-plasma-no-synthetic/proof.log \
+            | tee evidence-plasma-no-synthetic/summary.log || true
+
+      - name: Upload proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-no-synthetic-balance-proof
+          path: evidence-plasma-no-synthetic/
+          if-no-files-found: error
+          retention-days: 30
