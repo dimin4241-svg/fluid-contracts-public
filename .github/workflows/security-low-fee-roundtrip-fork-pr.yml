@@ -30,6 +30,9 @@ jobs:
           mkdir -p audit/fork-poc/src audit/fork-poc/test
           cp test/security/LowFeeExactOutRoundTrip.t.sol audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
           sed -i 's/25_686_659/25_686_672/' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
+          sed -i 's/0x91716c4eda1fb55e84bf8b4c7085f84285c19085/0x91716C4EDA1Fb55e84Bf8b4c7085f84285c19085/' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
+          sed -i 's/0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE/' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
+          sed -i 's/snapshotState()/snapshot()/g; s/revertToState/revertTo/g' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
       - name: Run fixed-block stateful round-trip search
         shell: bash
         run: |
