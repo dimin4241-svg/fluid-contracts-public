@@ -1,0 +1,63 @@
+name: Security Plasma repeated batch extraction proof
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - 'test/security/PlasmaRepeatedBatchExtraction.t.sol'
+      - '.github/workflows/security-plasma-repeated-batch-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repeated-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - name: Checkout audit branch with dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Prepare isolated Plasma harness
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/src audit/fork-poc/test evidence-plasma-repeat
+          cp test/security/PlasmaRepeatedBatchExtraction.t.sol audit/fork-poc/test/
+
+      - name: Run repeated multi-block extraction proof
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/fork-poc \
+            --via-ir \
+            --match-path test/PlasmaRepeatedBatchExtraction.t.sol \
+            -vvvv 2>&1 | tee evidence-plasma-repeat/plasma-repeated-proof.log
+
+      - name: Extract repeated proof summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "Plasma(SequenceProof|RepeatedProof|ExecutionRevert)\(|Suite result|Failing tests|OutOfGas|Error:" \
+            evidence-plasma-repeat/plasma-repeated-proof.log \
+            | tee evidence-plasma-repeat/plasma-repeated-proof-summary.log || true
+
+      - name: Upload repeated proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-repeated-batch-proof
+          path: evidence-plasma-repeat/
+          if-no-files-found: error
+          retention-days: 30
