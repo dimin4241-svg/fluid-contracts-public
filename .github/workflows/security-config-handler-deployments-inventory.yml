@@ -1,0 +1,55 @@
+name: Security config handler deployments inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-config-handler-deployments-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Extract handlers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-config-handlers
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          needles=('maxborrow','bufferrate','dexfeehandler','expandpercent','ethenarate','withdrawlimit')
+          rows=[]
+          for p in Path('deployments').rglob('*.json'):
+              low=p.name.lower()
+              if not any(n in low for n in needles): continue
+              try:d=json.loads(p.read_text(errors='replace'))
+              except:continue
+              a=d.get('address')
+              if not isinstance(a,str):continue
+              rows.append({'chain':p.parts[1] if len(p.parts)>1 else 'unknown','name':p.stem,'address':a,'path':str(p)})
+          by={}
+          for r in rows:
+              k=(r['chain'],r['address'].lower())
+              if k not in by:by[k]={**r,'aliases':[r['path']]}
+              elif r['path'] not in by[k]['aliases']:by[k]['aliases'].append(r['path'])
+          out=sorted(by.values(),key=lambda x:(x['chain'],x['name']))
+          Path('evidence-config-handlers/deployments.json').write_text(json.dumps(out,indent=2))
+          for r in out:print(json.dumps(r,sort_keys=True))
+          print('unique handlers',len(out))
+          PY
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-handler-deployments-inventory
+          path: evidence-config-handlers/
+          if-no-files-found: error
+          retention-days: 30
