@@ -10,12 +10,17 @@ on:
       - 'scripts/security/fsl-watch-trigger.txt'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -36,3 +41,14 @@ jobs:
             fsl-fee-report.json
             fsl-fee-exit-code.txt
           retention-days: 1
+      - name: Publish latest result to branch
+        shell: bash
+        run: |
+          mkdir -p scripts/security/results
+          cp fsl-fee-report.json scripts/security/results/fsl-fee-latest.json
+          cp fsl-fee-exit-code.txt scripts/security/results/fsl-fee-latest-exit-code.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/security/results/fsl-fee-latest.json scripts/security/results/fsl-fee-latest-exit-code.txt
+          git commit -m "Record latest fSL feeOrReward check" || exit 0
+          git push origin HEAD:audit/read-only-dex-fees-20260805
