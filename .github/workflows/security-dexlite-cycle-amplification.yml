@@ -1,0 +1,82 @@
+name: Security DexLite cycle amplification search
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - 'test/security/DexLiteCycleAmplificationSearch.t.sol'
+      - '.github/workflows/security-dexlite-cycle-amplification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MAINNET_RPC_URL: 'https://ethereum-rpc.publicnode.com'
+    steps:
+      - name: Checkout with dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Ethereum block
+        shell: bash
+        run: |
+          MAINNET_FORK_BLOCK="$(cast block-number --rpc-url "$MAINNET_RPC_URL")"
+          echo "MAINNET_FORK_BLOCK=$MAINNET_FORK_BLOCK" >> "$GITHUB_ENV"
+          echo "Fork block: $MAINNET_FORK_BLOCK"
+
+      - name: Prepare isolated harness
+        shell: bash
+        run: |
+          mkdir -p audit/dexlite-amplification/test audit/dexlite-amplification/src audit/dexlite-amplification/lib evidence-dexlite-amplification
+          cp test/security/DexLiteCycleAmplificationSearch.t.sol audit/dexlite-amplification/test/
+          ln -s "$GITHUB_WORKSPACE/lib/forge-std" audit/dexlite-amplification/lib/forge-std
+          cat > audit/dexlite-amplification/foundry.toml <<'EOF'
+          [profile.default]
+          src = "src"
+          test = "test"
+          libs = ["lib"]
+          solc_version = "0.8.29"
+          evm_version = "cancun"
+          optimizer = true
+          optimizer_runs = 200
+          via_ir = true
+          gas_limit = "18446744073709551615"
+          EOF
+
+      - name: Search and execute best cycle
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/dexlite-amplification \
+            --match-path test/DexLiteCycleAmplificationSearch.t.sol \
+            -vvvv 2>&1 | tee evidence-dexlite-amplification/amplification.log
+
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(NewBest|SearchSummary|ActualExecution|Suite result|Failing tests|Error:)" \
+            evidence-dexlite-amplification/amplification.log \
+            | tee evidence-dexlite-amplification/amplification-summary.log || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dexlite-cycle-amplification-search
+          path: evidence-dexlite-amplification/
+          if-no-files-found: error
+          retention-days: 30
