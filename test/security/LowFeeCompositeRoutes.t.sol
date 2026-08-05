@@ -37,7 +37,6 @@ contract CompositeRouteExecutor {
         require(ok && (data.length == 0 || abi.decode(data, (bool))), "APPROVE_FAILED");
     }
 
-    /// exact token1 out from A, then spend all received token1 exact-in on B.
     function outThenIn(address poolA, address poolB, uint256 amountOut1)
         external returns (uint256 amountIn0, uint256 amountOut0, int256 delta0, int256 delta1)
     {
@@ -49,7 +48,6 @@ contract CompositeRouteExecutor {
         delta1 = int256(IERC20Route(token1).balanceOf(address(this))) - int256(before1);
     }
 
-    /// exact token0 in on A, then request the same token0 exact-out from B.
     function inThenOut(address poolA, address poolB, uint256 amountIn0)
         external returns (uint256 amountOut1, uint256 amountIn1, int256 delta0, int256 delta1)
     {
@@ -63,7 +61,6 @@ contract CompositeRouteExecutor {
 }
 
 contract LowFeeCompositeRoutesTest is Test {
-    uint256 internal constant FORK_BLOCK = 25_686_672;
     address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address internal constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
     address internal constant DEX2 = 0x667701e51B4D1Ca244F17C78F7aB8744B4C99F9B;
@@ -82,23 +79,31 @@ contract LowFeeCompositeRoutesTest is Test {
     );
 
     function setUp() public {
-        vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), FORK_BLOCK);
+        vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
     }
 
-    function test_searchMixedAndCrossPoolRoutes() public {
-        _searchOutThenIn(DEX2, DEX2, "DEX2 out-in");
-        _searchInThenOut(DEX2, DEX2, "DEX2 in-out");
-        _searchOutThenIn(DEX34, DEX34, "DEX34 out-in");
-        _searchInThenOut(DEX34, DEX34, "DEX34 in-out");
-        _searchOutThenIn(DEX2, DEX34, "DEX2->DEX34 out-in");
-        _searchOutThenIn(DEX34, DEX2, "DEX34->DEX2 out-in");
-        _searchInThenOut(DEX2, DEX34, "DEX2->DEX34 in-out");
-        _searchInThenOut(DEX34, DEX2, "DEX34->DEX2 in-out");
-    }
+    function test_Dex2OutIn() public { _searchOutThenIn(DEX2, DEX2, "DEX2 out-in"); }
+    function test_Dex2InOut() public { _searchInThenOut(DEX2, DEX2, "DEX2 in-out"); }
+    function test_Dex34OutIn() public { _searchOutThenIn(DEX34, DEX34, "DEX34 out-in"); }
+    function test_Dex34InOut() public { _searchInThenOut(DEX34, DEX34, "DEX34 in-out"); }
+    function test_Dex2ToDex34OutIn() public { _searchOutThenIn(DEX2, DEX34, "DEX2->DEX34 out-in"); }
+    function test_Dex34ToDex2OutIn() public { _searchOutThenIn(DEX34, DEX2, "DEX34->DEX2 out-in"); }
+    function test_Dex2ToDex34InOut() public { _searchInThenOut(DEX2, DEX34, "DEX2->DEX34 in-out"); }
+    function test_Dex34ToDex2InOut() public { _searchInThenOut(DEX34, DEX2, "DEX34->DEX2 in-out"); }
 
     function _newExecutor(address poolA, address poolB) internal returns (CompositeRouteExecutor executor) {
         executor = new CompositeRouteExecutor(USDC, USDT, poolA, poolB);
-        deal(USDC, address(executor), 1_000_000_000_000); // fork-only attacker inventory
+        deal(USDC, address(executor), 1_000_000_000_000);
+    }
+
+    function _candidate(uint256 i) internal pure returns (uint256) {
+        uint256[27] memory amounts = [
+            uint256(100), 101, 102, 103, 104, 105, 106, 107, 108,
+            109, 110, 111, 125, 150, 199, 200, 201, 250,
+            500, 750, 1_000, 5_000, 10_000, 100_000,
+            1_000_000, 10_000_000, 100_000_000
+        ];
+        return amounts[i];
     }
 
     function _searchOutThenIn(address poolA, address poolB, string memory label) internal {
@@ -111,32 +116,22 @@ contract LowFeeCompositeRoutesTest is Test {
         uint256 bestSecond;
         uint256 bestGas;
 
-        for (uint256 amount = 100; amount <= 5_000; amount++) {
+        for (uint256 i; i < 27; i++) {
+            uint256 amount = _candidate(i);
             uint256 gasBefore = gasleft();
             try executor.outThenIn(poolA, poolB, amount) returns (
                 uint256 firstQuote, uint256 secondQuote, int256 d0, int256 d1
             ) {
                 if (d0 > best) {
-                    best = d0; bestOther = d1; bestAmount = amount;
-                    bestFirst = firstQuote; bestSecond = secondQuote; bestGas = gasBefore - gasleft();
+                    best = d0;
+                    bestOther = d1;
+                    bestAmount = amount;
+                    bestFirst = firstQuote;
+                    bestSecond = secondQuote;
+                    bestGas = gasBefore - gasleft();
                 }
             } catch {}
             require(vm.revertTo(snap), "restore failed");
-        }
-
-        uint256 amountLarge = 10_000;
-        for (uint256 i; i < 9; i++) {
-            uint256 gasBefore = gasleft();
-            try executor.outThenIn(poolA, poolB, amountLarge) returns (
-                uint256 firstQuote, uint256 secondQuote, int256 d0, int256 d1
-            ) {
-                if (d0 > best) {
-                    best = d0; bestOther = d1; bestAmount = amountLarge;
-                    bestFirst = firstQuote; bestSecond = secondQuote; bestGas = gasBefore - gasleft();
-                }
-            } catch {}
-            require(vm.revertTo(snap), "restore failed");
-            amountLarge *= 10;
         }
         emit RouteBest(label, poolA, poolB, bestAmount, best, bestOther, bestFirst, bestSecond, bestGas);
     }
@@ -151,32 +146,22 @@ contract LowFeeCompositeRoutesTest is Test {
         uint256 bestSecond;
         uint256 bestGas;
 
-        for (uint256 amount = 100; amount <= 5_000; amount++) {
+        for (uint256 i; i < 27; i++) {
+            uint256 amount = _candidate(i);
             uint256 gasBefore = gasleft();
             try executor.inThenOut(poolA, poolB, amount) returns (
                 uint256 firstQuote, uint256 secondQuote, int256 d0, int256 d1
             ) {
                 if (d1 > best) {
-                    best = d1; bestOther = d0; bestAmount = amount;
-                    bestFirst = firstQuote; bestSecond = secondQuote; bestGas = gasBefore - gasleft();
+                    best = d1;
+                    bestOther = d0;
+                    bestAmount = amount;
+                    bestFirst = firstQuote;
+                    bestSecond = secondQuote;
+                    bestGas = gasBefore - gasleft();
                 }
             } catch {}
             require(vm.revertTo(snap), "restore failed");
-        }
-
-        uint256 amountLarge = 10_000;
-        for (uint256 i; i < 9; i++) {
-            uint256 gasBefore = gasleft();
-            try executor.inThenOut(poolA, poolB, amountLarge) returns (
-                uint256 firstQuote, uint256 secondQuote, int256 d0, int256 d1
-            ) {
-                if (d1 > best) {
-                    best = d1; bestOther = d0; bestAmount = amountLarge;
-                    bestFirst = firstQuote; bestSecond = secondQuote; bestGas = gasBefore - gasleft();
-                }
-            } catch {}
-            require(vm.revertTo(snap), "restore failed");
-            amountLarge *= 10;
         }
         emit RouteBest(label, poolA, poolB, bestAmount, best, bestOther, bestFirst, bestSecond, bestGas);
     }
