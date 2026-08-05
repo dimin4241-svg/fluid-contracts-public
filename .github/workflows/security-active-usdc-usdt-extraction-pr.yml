@@ -35,6 +35,7 @@ jobs:
           set -o pipefail
           forge test \
             --root audit/fork-poc \
+            --via-ir \
             --match-path test/ActiveUsdcUsdtRoundingExtraction.t.sol \
             -vvvv 2>&1 | tee active-usdc-usdt-extraction.log
       - name: Upload proof log
