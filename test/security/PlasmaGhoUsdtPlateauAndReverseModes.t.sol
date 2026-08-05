@@ -75,6 +75,20 @@ contract PlasmaGhoUsdtPlateauAndReverseModesTest is Test {
         uint256 gasUsed
     );
 
+    event PlateauCandidateRevert(
+        uint256 targetUsdtInputRaw,
+        uint256 ghoOutEach,
+        uint8 reverseMode,
+        bytes4 selector,
+        uint256 errorId
+    );
+
+    event PlateauSearchBest(
+        int256 bestParityValueDelta18,
+        uint256 successfulCandidates,
+        uint256 revertedCandidates
+    );
+
     function setUp() public {
         vm.createSelectFork(vm.envString("PLASMA_RPC_URL"));
         assertEq(block.chainid, 9745, "unexpected chain");
@@ -118,16 +132,20 @@ contract PlasmaGhoUsdtPlateauAndReverseModesTest is Test {
         return values[i];
     }
 
-    function _deltas(address executor, uint256 usdtBefore, uint256 ghoBefore, uint256 lUsdtBefore, uint256 lGhoBefore)
-        internal view returns (int256 aUsdt, int256 aGho, int256 lUsdt, int256 lGho)
-    {
+    function _deltas(
+        address executor,
+        uint256 usdtBefore,
+        uint256 ghoBefore,
+        uint256 lUsdtBefore,
+        uint256 lGhoBefore
+    ) internal view returns (int256 aUsdt, int256 aGho, int256 lUsdt, int256 lGho) {
         aUsdt = int256(IERC20Plateau(USDT0).balanceOf(executor)) - int256(usdtBefore);
         aGho = int256(IERC20Plateau(GHO).balanceOf(executor)) - int256(ghoBefore);
         lUsdt = int256(IERC20Plateau(USDT0).balanceOf(LIQUIDITY)) - int256(lUsdtBefore);
         lGho = int256(IERC20Plateau(GHO).balanceOf(LIQUIDITY)) - int256(lGhoBefore);
     }
 
-    function _runCandidate(uint256 target, uint256 amountOut, uint8 mode)
+    function _runCandidateInner(uint256 target, uint256 amountOut, uint8 mode)
         internal returns (int256 parityValue)
     {
         PlasmaPlateauExecutor executor = new PlasmaPlateauExecutor();
@@ -155,23 +173,63 @@ contract PlasmaGhoUsdtPlateauAndReverseModesTest is Test {
         emit PlateauCandidate(target, amountOut, mode, aUsdt, aGho, lUsdt, lGho, parityValue, gasUsed);
     }
 
+    function runCandidate(uint256 target, uint256 amountOut, uint8 mode)
+        external returns (int256 parityValue)
+    {
+        require(msg.sender == address(this), "SELF_ONLY");
+        return _runCandidateInner(target, amountOut, mode);
+    }
+
+    function _decode(bytes memory reason) internal pure returns (bytes4 selector, uint256 errorId) {
+        if (reason.length >= 4) {
+            assembly ("memory-safe") {
+                selector := mload(add(reason, 32))
+            }
+        }
+        if (reason.length >= 36) {
+            assembly ("memory-safe") {
+                errorId := mload(add(reason, 36))
+            }
+        }
+    }
+
+    function _tryCandidate(uint256 target, uint256 amountOut, uint8 mode)
+        internal returns (bool success, int256 parityValue)
+    {
+        try this.runCandidate(target, amountOut, mode) returns (int256 value) {
+            return (true, value);
+        } catch (bytes memory reason) {
+            (bytes4 selector, uint256 errorId) = _decode(reason);
+            emit PlateauCandidateRevert(target, amountOut, mode, selector, errorId);
+            return (false, 0);
+        }
+    }
+
     function test_searchBroadInputPlateausAndReverseModes() public {
         int256 bestParityValue;
+        uint256 successfulCandidates;
+        uint256 revertedCandidates;
+
         for (uint256 i; i < 9; ++i) {
             uint256 target = _target(i);
             uint256 amountOut = _maxGhoOutAtOrBelow(target);
             if (amountOut == 0) continue;
 
-            uint256 snap = vm.snapshot();
-            int256 exactOutValue = _runCandidate(target, amountOut, 0);
-            if (exactOutValue > bestParityValue) bestParityValue = exactOutValue;
-            require(vm.revertTo(snap), "RESTORE_OUT");
-
-            snap = vm.snapshot();
-            int256 exactInValue = _runCandidate(target, amountOut, 1);
-            if (exactInValue > bestParityValue) bestParityValue = exactInValue;
-            require(vm.revertTo(snap), "RESTORE_IN");
+            for (uint8 mode; mode < 2; ++mode) {
+                uint256 snap = vm.snapshot();
+                (bool success, int256 value) = _tryCandidate(target, amountOut, mode);
+                if (success) {
+                    ++successfulCandidates;
+                    if (value > bestParityValue) bestParityValue = value;
+                } else {
+                    ++revertedCandidates;
+                }
+                require(vm.revertTo(snap), "RESTORE_FAILED");
+            }
         }
+
+        emit PlateauSearchBest(bestParityValue, successfulCandidates, revertedCandidates);
         assertGt(bestParityValue, 0, "no positive closed cycle");
+        assertGt(successfulCandidates, 0, "all candidates reverted");
     }
 }
