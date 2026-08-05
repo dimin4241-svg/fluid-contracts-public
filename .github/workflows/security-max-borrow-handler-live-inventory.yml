@@ -1,0 +1,68 @@
+name: Security max borrow handler live inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-max-borrow-handler-live-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RPC_URL: 'https://ethereum-rpc.publicnode.com'
+      HANDLER: '0x383683D4414Fc27CC9669b7Cc6c7067716814b6a'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query handler
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-max-borrow
+          python3 - <<'PY'
+          import json,subprocess
+          rpc='https://ethereum-rpc.publicnode.com'; a='0x383683D4414Fc27CC9669b7Cc6c7067716814b6a'
+          def call(addr,sig):
+            return subprocess.check_output(['cast','call',addr,sig,'--rpc-url',rpc],text=True,stderr=subprocess.STDOUT).strip()
+          r={'address':a,'block':int(subprocess.check_output(['cast','block-number','--rpc-url',rpc],text=True).strip())}
+          for k,s in [
+            ('protocol','PROTOCOL()(address)'),('borrowToken','BORROW_TOKEN()(address)'),
+            ('maxUtilization','MAX_UTILIZATION()(uint256)'),('minUpdateDiff','MIN_UPDATE_DIFF()(uint256)'),
+            ('totalSupply','getTotalSupply()(uint256)'),('currentCeilingRaw','currentMaxDebtCeiling()(uint256)'),
+            ('calcCeilingRaw','calcMaxDebtCeiling()(uint256)'),('calcCeilingNormal','calcMaxDebtCeilingNormal()(uint256)'),
+            ('configPercentDiff','configPercentDiff()(uint256)'),('liquidity','LIQUIDITY()(address)'),
+            ('resolver','LIQUIDITY_RESOLVER()(address)'),('reserve','RESERVE_CONTRACT()(address)')
+          ]:
+            try:r[k]=call(a,s)
+            except subprocess.CalledProcessError as e:r[k]='ERROR:'+e.output[-400:]
+          tok=r.get('borrowToken','').split()[0]
+          if tok.startswith('0x'):
+            for k,s in [('tokenDecimals','decimals()(uint8)'),('tokenSymbol','symbol()(string)')]:
+              try:r[k]=call(tok,s)
+              except:pass
+          p=r.get('protocol','').split()[0]
+          if p.startswith('0x'):
+            try:r['protocolConstants']=call(p,'constantsView()((address,address,address,address,address,address,address,address,(address,address),(address,address),uint256,uint256,bytes32,bytes32,bytes32,bytes32))')
+            except:pass
+          open('evidence-max-borrow/live-state.json','w').write(json.dumps(r,indent=2))
+          print(json.dumps(r,indent=2))
+          PY
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: max-borrow-handler-live-inventory
+          path: evidence-max-borrow/
+          if-no-files-found: error
+          retention-days: 30
