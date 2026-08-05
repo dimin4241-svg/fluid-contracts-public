@@ -1,0 +1,74 @@
+name: Security Plasma atomic persistence matrix
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/security-plasma-atomic-persistence-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-proof:
+    name: offset-${{ matrix.offset }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        offset: [0, 100, 1000, 10000, 50000]
+    env:
+      PLASMA_RPC_URL: 'https://rpc.plasma.to'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Select historical deployed state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit/fork-poc/test evidence-persistence
+          LATEST="$(cast block-number --rpc-url "${PLASMA_RPC_URL}")"
+          TARGET="$((LATEST - ${{ matrix.offset }}))"
+          GAS_PRICE="$(cast gas-price --rpc-url "${PLASMA_RPC_URL}")"
+          {
+            echo "PLASMA_FORK_BLOCK=${TARGET}"
+            echo "PLASMA_GAS_PRICE_WEI=${GAS_PRICE}"
+          } >> "${GITHUB_ENV}"
+          {
+            echo "latest_block=${LATEST}"
+            echo "offset=${{ matrix.offset }}"
+            echo "target_block=${TARGET}"
+            echo "gas_price_wei=${GAS_PRICE}"
+          } | tee evidence-persistence/deployed-state.txt
+          cast block "${TARGET}" --json --rpc-url "${PLASMA_RPC_URL}" > evidence-persistence/fork-block.json
+      - name: Prepare isolated harness
+        run: cp test/security/PlasmaGhoUsdtAtomicNoSynthetic.t.sol audit/fork-poc/test/
+      - name: Run historical atomic proof
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/fork-poc --via-ir \
+            --match-path test/PlasmaGhoUsdtAtomicNoSynthetic.t.sol \
+            -vvvv 2>&1 | tee evidence-persistence/proof.log
+      - name: Extract summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E 'AtomicExistingFundsProof\(|Suite result|Failing tests|Compiler run failed|Error:' \
+            evidence-persistence/proof.log \
+            | tee evidence-persistence/summary.log || true
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-atomic-persistence-offset-${{ matrix.offset }}
+          path: evidence-persistence/
+          if-no-files-found: error
+          retention-days: 30
