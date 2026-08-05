@@ -1,0 +1,67 @@
+name: Security DexFeeHandler live inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-dex-fee-handler-live-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query handlers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-dex-fees
+          python3 - <<'PY'
+          import json,subprocess
+          hs=[
+            ('mainnet','sUSDe-USDT','https://ethereum-rpc.publicnode.com','0xc5ba4D4142Ae5cf9ec802B298963A08390658f05'),
+            ('mainnet','USDC-USDT','https://ethereum-rpc.publicnode.com','0x65454D16A39c7b5b52A67116FC1cf0a5e5942EFd'),
+            ('mainnet','USDe-USDT','https://ethereum-rpc.publicnode.com','0x49EF1B3230a8d2AC7205E808dF5859f1b94D61Df'),
+            ('mainnet','weETH-ETH','https://ethereum-rpc.publicnode.com','0xD43d85f4F4eEDdA3ed3BbE2Ca7351eE32b8bB44a'),
+            ('mainnet','wstETH-ETH','https://ethereum-rpc.publicnode.com','0x1FAf33c33ce81DC86fe50ba5b6F3417aBEC01d6E'),
+            ('arbitrum','USDC-USDT','https://arbitrum-one-rpc.publicnode.com','0x5F05F9d0De2BcaDC5303Cb6a991d2Fb678972169'),
+          ]
+          def call(rpc,a,s):
+            return subprocess.check_output(['cast','call',a,s,'--rpc-url',rpc],text=True,stderr=subprocess.STDOUT).strip()
+          rows=[]
+          for chain,name,rpc,a in hs:
+            r={'chain':chain,'name':name,'address':a,'block':int(subprocess.check_output(['cast','block-number','--rpc-url',rpc],text=True).strip())}
+            for k,s in [
+              ('dex','DEX()(address)'),('minFee','MIN_FEE()(uint256)'),('maxFee','MAX_FEE()(uint256)'),
+              ('minDeviation','MIN_DEVIATION()(uint256)'),('maxDeviation','MAX_DEVIATION()(uint256)'),
+              ('centerPriceActive','CENTER_PRICE_ACTIVE()(bool)'),('currentFee','currentConfig()(uint256)'),
+              ('newFee','newConfig()(uint256)'),('absoluteDiff','absoluteConfigDiff()(uint256)'),
+              ('relativeDiff','relativeConfigPercentDiff()(uint256)'),('centerPrice','getDexCenterPrice()(uint256)'),
+              ('feeAndCut','getDexFeeAndRevenueCut()((uint256,uint256))'),
+              ('dexVariables','getDexVariables()((uint256,uint256,uint256))'),('reserve','RESERVE_CONTRACT()(address)')
+            ]:
+              try:r[k]=call(rpc,a,s)
+              except subprocess.CalledProcessError as e:r[k]='ERROR:'+e.output[-400:]
+            rows.append(r)
+          open('evidence-dex-fees/live-state.json','w').write(json.dumps(rows,indent=2))
+          for r in rows:print(json.dumps(r,sort_keys=True))
+          PY
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-fee-handler-live-inventory
+          path: evidence-dex-fees/
+          if-no-files-found: error
+          retention-days: 30
