@@ -1,0 +1,150 @@
+name: Security cross-module source sweep
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-cross-module-source-sweep.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository with dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install Slither
+        shell: bash
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install slither-analyzer
+
+      - name: Build repository
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p evidence
+          forge build 2>&1 | tee evidence/forge-build.log
+
+      - name: Run Slither
+        continue-on-error: true
+        shell: bash
+        run: |
+          slither . \
+            --exclude-dependencies \
+            --filter-paths 'test|deployments|script|node_modules|lib' \
+            --json evidence/slither.json \
+            2>&1 | tee evidence/slither.log
+
+      - name: Generate risky-surface inventory
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, json
+
+          roots = [Path('contracts')]
+          patterns = {
+              'delegatecall': re.compile(r'\bdelegatecall\b'),
+              'low_level_call': re.compile(r'\.(?:call|staticcall)\s*[({]'),
+              'assembly': re.compile(r'\bassembly\b'),
+              'unchecked': re.compile(r'\bunchecked\b'),
+              'selfdestruct': re.compile(r'\bselfdestruct\b'),
+              'tx_origin': re.compile(r'\btx\.origin\b'),
+              'ecrecover': re.compile(r'\becrecover\b'),
+              'signature': re.compile(r'\b(?:permit|signature|nonce|domainSeparator|EIP712)\b', re.I),
+              'callback': re.compile(r'\bcallback\b', re.I),
+              'oracle': re.compile(r'\b(?:oracle|priceFeed|centerPrice|exchangeRate)\b', re.I),
+              'liquidation': re.compile(r'\b(?:liquidat|absorb|badDebt)\w*\b', re.I),
+              'sentinel_max': re.compile(r'type\s*\(\s*uint(?:256)?\s*\)\s*\.\s*max'),
+              'narrow_cast': re.compile(r'\buint(?:8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248)\s*\('),
+              'native_value': re.compile(r'\b(?:msg\.value|address\(this\)\.balance|call\{value:)'),
+              'transfer': re.compile(r'\b(?:transferFrom|safeTransferFrom|safeTransfer|transfer)\s*\('),
+              'auth': re.compile(r'\b(?:onlyOwner|onlyAuth|isAuth|governance|admin|owner|auths)\b', re.I),
+              'skip_transfer': re.compile(r'\bSKIP_TRANSFERS\b'),
+          }
+
+          hits = []
+          for root in roots:
+              for p in root.rglob('*.sol'):
+                  try:
+                      lines = p.read_text(errors='replace').splitlines()
+                  except Exception:
+                      continue
+                  for i, line in enumerate(lines, 1):
+                      for name, rx in patterns.items():
+                          if rx.search(line):
+                              hits.append({'kind': name, 'path': str(p), 'line': i, 'text': line.strip()[:500]})
+
+          Path('evidence/risky-surfaces.json').write_text(json.dumps(hits, indent=2))
+          with Path('evidence/risky-surfaces.tsv').open('w') as f:
+              f.write('kind\tpath\tline\ttext\n')
+              for h in hits:
+                  text = h['text'].replace('\t', ' ')
+                  f.write(f"{h['kind']}\t{h['path']}\t{h['line']}\t{text}\n")
+
+          # Function-level inventory with selected risky tokens in each body.
+          function_rx = re.compile(r'\bfunction\s+([A-Za-z0-9_]*)\s*\((.*?)\)', re.S)
+          fn_rows = []
+          for p in Path('contracts').rglob('*.sol'):
+              text = p.read_text(errors='replace')
+              lines = text.splitlines()
+              for idx, line in enumerate(lines):
+                  if 'function ' not in line:
+                      continue
+                  start = idx
+                  header = line
+                  j = idx + 1
+                  while '{' not in header and ';' not in header and j < min(len(lines), idx + 12):
+                      header += ' ' + lines[j]
+                      j += 1
+                  m = re.search(r'\bfunction\s+([A-Za-z0-9_]*)', header)
+                  if not m:
+                      continue
+                  name = m.group(1) or '<fallback>'
+                  depth = header.count('{') - header.count('}')
+                  body_lines = [header]
+                  k = j
+                  while depth > 0 and k < len(lines) and k < idx + 800:
+                      body_lines.append(lines[k])
+                      depth += lines[k].count('{') - lines[k].count('}')
+                      k += 1
+                  body = '\n'.join(body_lines)
+                  kinds = sorted(name for name, rx in patterns.items() if rx.search(body))
+                  if kinds:
+                      fn_rows.append({
+                          'path': str(p), 'line': start + 1, 'function': name,
+                          'header': header.strip()[:800], 'kinds': kinds,
+                          'body_lines': max(1, k - start)
+                      })
+          Path('evidence/risky-functions.json').write_text(json.dumps(fn_rows, indent=2))
+          print(f'raw hits={len(hits)} risky functions={len(fn_rows)}')
+          PY
+
+      - name: Archive source and evidence
+        shell: bash
+        run: |
+          tar -czf evidence/source-contracts.tar.gz contracts foundry.toml remappings.txt package.json 2>/dev/null || \
+          tar -czf evidence/source-contracts.tar.gz contracts foundry.toml
+
+      - name: Upload sweep evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-module-source-sweep
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
