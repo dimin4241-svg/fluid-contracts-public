@@ -1,6 +1,9 @@
 name: Security WBTC-cbBTC split-batch amplification
 
 on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
   pull_request:
     branches: [main]
   workflow_dispatch:
