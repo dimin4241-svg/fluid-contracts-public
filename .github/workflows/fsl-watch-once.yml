@@ -1,0 +1,38 @@
+name: fSL on-chain one-shot
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fsl-watch-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Query all fSL contracts
+        shell: bash
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py > fsl-watch-result.json
+          code=$?
+          echo "$code" > fsl-watch-exit-code.txt
+          exit 0
+      - name: Save snapshot on audit branch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add fsl-watch-result.json fsl-watch-exit-code.txt
+          git commit -m 'Record fSL feeOrReward snapshot' || exit 0
+          git push origin HEAD:audit/read-only-dex-fees-20260805
