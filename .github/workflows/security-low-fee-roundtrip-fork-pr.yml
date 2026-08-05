@@ -24,12 +24,19 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+      - name: Prepare isolated fork harness
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/src audit/fork-poc/test
+          cp test/security/LowFeeExactOutRoundTrip.t.sol audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
+          sed -i 's/25_686_659/25_686_672/' audit/fork-poc/test/LowFeeExactOutRoundTrip.t.sol
       - name: Run fixed-block stateful round-trip search
         shell: bash
         run: |
           set -o pipefail
           forge test \
-            --match-path test/security/LowFeeExactOutRoundTrip.t.sol \
+            --root audit/fork-poc \
+            --match-path test/LowFeeExactOutRoundTrip.t.sol \
             --match-test test_statefulRoundTripSearchOnEveryActiveLowFeePool \
             -vvvv 2>&1 | tee low-fee-roundtrip-fork.log
       - name: Upload PoC log
