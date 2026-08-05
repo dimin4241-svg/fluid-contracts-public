@@ -1,0 +1,68 @@
+name: Security Plasma share amplification probe
+
+on:
+  push:
+    branches:
+      - audit/plasma-share-amplification-20260805
+    paths:
+      - 'test/security/PlasmaShareAmplificationProbe.t.sol'
+      - '.github/workflows/security-plasma-share-amplification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - name: Checkout probe branch with dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated probe harness
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/src audit/fork-poc/test evidence-share
+          cp test/security/PlasmaShareAmplificationProbe.t.sol audit/fork-poc/test/
+
+      - name: Run Smart Collateral and Smart Debt amplification probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/fork-poc \
+            --via-ir \
+            --match-path test/PlasmaShareAmplificationProbe.t.sol \
+            -vvvv 2>&1 | tee evidence-share/share-amplification.log
+
+      - name: Extract evidence summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(PerturbationResult|CollateralQuoteResult|DebtQuoteResult|AmplificationSummary)\(|Suite result|Failing tests|Error:" \
+            evidence-share/share-amplification.log \
+            | tee evidence-share/share-amplification-summary.log || true
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-share-amplification-probe
+          path: evidence-share/
+          if-no-files-found: error
+          retention-days: 30
