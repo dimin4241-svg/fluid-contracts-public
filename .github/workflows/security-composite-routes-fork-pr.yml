@@ -29,6 +29,9 @@ jobs:
         run: |
           mkdir -p audit/fork-poc/src audit/fork-poc/test
           cp test/security/LowFeeCompositeRoutes.t.sol audit/fork-poc/test/LowFeeCompositeRoutes.t.sol
+          # PublicNode now rejects historical reads without an archive token.
+          # Search on latest state; emitted results remain tied to the run time.
+          sed -i 's/vm.createSelectFork(vm.envString("MAINNET_RPC_URL"), FORK_BLOCK);/vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));/' audit/fork-poc/test/LowFeeCompositeRoutes.t.sol
       - name: Run independent mixed and cross-pool searches
         shell: bash
         run: |
