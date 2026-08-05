@@ -1,0 +1,1 @@
+Trigger the read-only fSL feeOrReward verification workflow after the workflow was added to the default branch.
