@@ -1,0 +1,73 @@
+name: Security Reserve rebalancers inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-reserve-rebalancers-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RPC_URL: 'https://ethereum-rpc.publicnode.com'
+      RESERVE: '0x264786EF916af64a1DB19F513F24a3681734ce92'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Enumerate events and current status
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-rebalancers
+          python3 - <<'PY'
+          import json, subprocess
+          rpc='https://ethereum-rpc.publicnode.com'
+          reserve='0x264786EF916af64a1DB19F513F24a3681734ce92'
+          start=19239135
+          latest=int(subprocess.check_output(['cast','block-number','--rpc-url',rpc],text=True).strip())
+          topic=subprocess.check_output(['cast','keccak','LogUpdateRebalancer(address,bool)'],text=True).strip()
+          logs=[]
+          step=100_000
+          for lo in range(start,latest+1,step):
+              hi=min(latest,lo+step-1)
+              filt=json.dumps({'address':reserve,'fromBlock':hex(lo),'toBlock':hex(hi),'topics':[topic]})
+              try:
+                  raw=subprocess.check_output(['cast','rpc','--rpc-url',rpc,'eth_getLogs',filt],text=True,stderr=subprocess.STDOUT)
+                  chunk=json.loads(raw)
+                  logs.extend(chunk)
+              except subprocess.CalledProcessError as e:
+                  print('chunk error',lo,hi,e.output)
+                  raise
+          history=[]; addresses=set()
+          for l in logs:
+              addr='0x'+l['topics'][1][-40:]
+              enabled=int(l['data'],16)!=0
+              addresses.add(addr.lower())
+              history.append({'block':int(l['blockNumber'],16),'tx':l['transactionHash'],'rebalancer':addr,'enabled':enabled})
+          current=[]
+          for a in sorted(addresses):
+              out=subprocess.check_output(['cast','call',reserve,f'isRebalancer(address)(bool) {a}','--rpc-url',rpc],text=True).strip()
+              current.append({'address':a,'isRebalancer':out.lower().startswith('true')})
+          result={'latestBlock':latest,'eventTopic':topic,'history':history,'current':current}
+          open('evidence-rebalancers/rebalancers.json','w').write(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          PY
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reserve-rebalancers-inventory
+          path: evidence-rebalancers/
+          if-no-files-found: error
+          retention-days: 30
