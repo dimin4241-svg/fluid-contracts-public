@@ -1,0 +1,40 @@
+name: Security inspect low-fee pools
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check web3==7.13.0 eth-abi==5.2.0
+      - name: Inspect low-fee pools (eth_call only)
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/security/inspect_low_fee_pools.py > low-fee-pools.json 2> low-fee-pools-summary.txt
+          cat low-fee-pools-summary.txt
+          cat low-fee-pools.json
+      - name: Upload inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: low-fee-pool-inspection
+          path: |
+            low-fee-pools.json
+            low-fee-pools-summary.txt
+          if-no-files-found: warn
