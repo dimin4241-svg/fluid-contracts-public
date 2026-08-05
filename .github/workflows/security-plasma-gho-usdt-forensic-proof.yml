@@ -17,9 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      PLASMA_RPC_URL: https://rpc.plasma.to
-      USDT0: 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb
-      USDT0_LIVE_HOLDER: 0x8741B106e9738a6971AD07DABCFe95FF66337b51
+      PLASMA_RPC_URL: 'https://rpc.plasma.to'
+      USDT0: '0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb'
+      USDT0_LIVE_HOLDER: '0x8741B106e9738a6971AD07DABCFe95FF66337b51'
     steps:
       - uses: actions/checkout@v4
         with:
