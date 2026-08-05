@@ -97,7 +97,7 @@ def read_rpc(session: requests.Session, chain_id: int, address: str) -> tuple[st
 
 def main() -> int:
     session = requests.Session()
-    session.headers.update({"User-Agent": "fluid-fsl-rate-watch/1.0"})
+    session.headers.update({"User-Agent": "fluid-fsl-rate-watch/1.1"})
     checked_at = datetime.now(timezone.utc).isoformat()
     rows: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
