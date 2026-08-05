@@ -1,0 +1,41 @@
+name: Security low-fee exact-output fork PoC
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fork-poc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
+    steps:
+      - name: Checkout with test dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Run fixed-block stateful round-trip search
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --match-path test/security/LowFeeExactOutRoundTrip.t.sol \
+            --match-test test_statefulRoundTripSearchOnEveryActiveLowFeePool \
+            -vvvv 2>&1 | tee low-fee-roundtrip-fork.log
+      - name: Upload PoC log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: low-fee-roundtrip-fork-log
+          path: low-fee-roundtrip-fork.log
+          if-no-files-found: warn
