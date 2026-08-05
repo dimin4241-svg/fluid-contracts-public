@@ -1,0 +1,148 @@
+name: Security selected chunked split scaling
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - 'test/security/SelectedChunkedSplitScaling.t.sol'
+      - '.github/workflows/security-selected-chunked-scaling.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scale:
+    name: ${{ matrix.candidate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - candidate: eth-fxUSD-USDC
+            rpc: https://ethereum-rpc.publicnode.com
+            pool: '0x0C88C9713520E9546252B09E57fAa46e9854743A'
+            liquidity: '0x52Aa899454998Be5b000Ad077a46Bbe360F4e497'
+            token0: '0x085780639CC2cACd35E474e71f4d000e2405d8f6'
+            token1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+            dec0: 18
+            dec1: 6
+            direction: false
+            amount: '256000000000001'
+          - candidate: eth-LBTC-cbBTC
+            rpc: https://ethereum-rpc.publicnode.com
+            pool: '0xc8F989E9B7ECE1b4D092Ae4db7fAF1294146bdA4'
+            liquidity: '0x52Aa899454998Be5b000Ad077a46Bbe360F4e497'
+            token0: '0x8236a87084f8B84306f72007F36F2618A5634494'
+            token1: '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf'
+            dec0: 8
+            dec1: 8
+            direction: true
+            amount: '101'
+          - candidate: arb-USDC-USDT0
+            rpc: https://arbitrum-one-rpc.publicnode.com
+            pool: '0x3C0441B42195F4aD6aa9a0978E06096ea616CDa7'
+            liquidity: '0x52Aa899454998Be5b000Ad077a46Bbe360F4e497'
+            token0: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+            token1: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
+            dec0: 6
+            dec1: 6
+            direction: true
+            amount: '101'
+          - candidate: base-yoUSD-USDC
+            rpc: https://base-rpc.publicnode.com
+            pool: '0xFD6D459F04c3F0568e7361F29d0390081A43b90b'
+            liquidity: '0x52Aa899454998Be5b000Ad077a46Bbe360F4e497'
+            token0: '0x0000000f2eB9f69274678c76222B35eEc7588a65'
+            token1: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+            dec0: 6
+            dec1: 6
+            direction: true
+            amount: '109'
+          - candidate: base-yoBTC-cbBTC
+            rpc: https://base-rpc.publicnode.com
+            pool: '0xBA9ed8AE94C70Ef9AA2cd1045ED473aaa405C6c7'
+            liquidity: '0x52Aa899454998Be5b000Ad077a46Bbe360F4e497'
+            token0: '0xbCbc8cb4D1e8ED048a6276a5E94A3e952660BcbC'
+            token1: '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf'
+            dec0: 8
+            dec1: 8
+            direction: true
+            amount: '102'
+          - candidate: polygon-USDC-XSGD
+            rpc: https://polygon-bor-rpc.publicnode.com
+            pool: '0xBA9ed8AE94C70Ef9AA2cd1045ED473aaa405C6c7'
+            liquidity: '0x52Aa899454998Be5b000Ad077a46Bbe360F4e497'
+            token0: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'
+            token1: '0xDC3326e71D45186F113a2F448984CA0e8D201995'
+            dec0: 6
+            dec1: 6
+            direction: true
+            amount: '137'
+          - candidate: plasma-GHO-USDT0
+            rpc: https://rpc.plasma.to
+            pool: '0x080574D224E960c272e005aA03EFbe793f317640'
+            liquidity: '0x52Aa899454998Be5b000Ad077a46Bbe360F4e497'
+            token0: '0xb77E872A68C62CfC0dFb02C067Ecc3DA23B4bbf3'
+            token1: '0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb'
+            dec0: 18
+            dec1: 6
+            direction: false
+            amount: '256000000000001'
+    env:
+      CANDIDATE: ${{ matrix.candidate }}
+      RPC_URL: ${{ matrix.rpc }}
+      POOL: ${{ matrix.pool }}
+      LIQUIDITY: ${{ matrix.liquidity }}
+      TOKEN0: ${{ matrix.token0 }}
+      TOKEN1: ${{ matrix.token1 }}
+      TOKEN0_DECIMALS: ${{ matrix.dec0 }}
+      TOKEN1_DECIMALS: ${{ matrix.dec1 }}
+      FORWARD_0_TO_1: ${{ matrix.direction }}
+      AMOUNT_OUT_EACH: ${{ matrix.amount }}
+      CHUNK_SIZE: 128
+    steps:
+      - name: Checkout audit branch with dependencies
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Prepare isolated scaling harness
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/src audit/fork-poc/test evidence-scale/${CANDIDATE}
+          cp test/security/SelectedChunkedSplitScaling.t.sol audit/fork-poc/test/
+
+      - name: Run multi-transaction scaling proof
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/fork-poc \
+            --via-ir \
+            --match-path test/SelectedChunkedSplitScaling.t.sol \
+            -vvvv 2>&1 | tee evidence-scale/${CANDIDATE}/chunked-scaling.log
+
+      - name: Extract scaling results
+        if: always()
+        shell: bash
+        run: |
+          grep -E "ChunkedScale(Result|Revert)\(|Suite result|Failing tests|OutOfGas|Error:" \
+            evidence-scale/${CANDIDATE}/chunked-scaling.log \
+            | tee evidence-scale/${CANDIDATE}/chunked-scaling-summary.log || true
+
+      - name: Upload scaling evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chunked-scaling-${{ matrix.candidate }}
+          path: evidence-scale/${{ matrix.candidate }}/
+          if-no-files-found: error
+          retention-days: 30
