@@ -16,9 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      MAINNET_RPC_URL: https://ethereum-rpc.publicnode.com
-      DEX_LITE: 0xBbcb91440523216e2b87052A99F69c604A7b6e00
-      EXTRA_DATA_SLOT: 0x7e8134afb5ed35d36cb65e24b9a4712a52bb77d952806c1acf50970d2107797f
+      MAINNET_RPC_URL: 'https://ethereum-rpc.publicnode.com'
+      DEX_LITE: '0xBbcb91440523216e2b87052A99F69c604A7b6e00'
+      EXTRA_DATA_SLOT: '0x7e8134afb5ed35d36cb65e24b9a4712a52bb77d952806c1acf50970d2107797f'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
