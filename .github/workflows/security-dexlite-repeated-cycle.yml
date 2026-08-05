@@ -52,6 +52,7 @@ jobs:
           evm_version = "cancun"
           optimizer = true
           optimizer_runs = 200
+          via_ir = true
           EOF
 
       - name: Run repeated-pool cycle matrix
