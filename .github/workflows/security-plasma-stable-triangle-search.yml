@@ -1,0 +1,48 @@
+name: Security Plasma stable triangle search
+
+on:
+  push:
+    branches: [audit/read-only-dex-fees-20260805]
+    paths:
+      - 'test/security/PlasmaStableTriangleSearch.t.sol'
+      - '.github/workflows/security-plasma-stable-triangle-search.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare harness
+        run: |
+          mkdir -p audit/fork-poc/test evidence-triangle
+          cp test/security/PlasmaStableTriangleSearch.t.sol audit/fork-poc/test/
+      - name: Run triangle route search
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/fork-poc --via-ir \
+            --match-path test/PlasmaStableTriangleSearch.t.sol -vvvv \
+            2>&1 | tee evidence-triangle/triangle.log
+      - name: Extract summary
+        if: always()
+        run: |
+          grep -E 'TriangleBest\(|TriangleCandidate\(|Suite result|Failing tests|Error:' \
+            evidence-triangle/triangle.log | tee evidence-triangle/summary.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plasma-stable-triangle-search
+          path: evidence-triangle/
+          retention-days: 30
