@@ -78,7 +78,11 @@ contract ActiveUsdcUsdtRoundingExtractionTest is Test {
     address internal constant LIQUIDITY = 0x52Aa899454998Be5b000Ad077a46Bbe360F4e497;
     address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address internal constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
-    uint256 internal constant AMOUNT_OUT_USDT = 100;
+    // 100 USDT out costs 99 USDC, but the reverse 99-USDC exact-output leg
+    // is rejected by the protocol's raw minimum amount of 100. At 101 USDT
+    // out, the rounded first-leg input is expected to be 100 USDC, making the
+    // reverse leg admissible while retaining the one-unit rounding surplus.
+    uint256 internal constant AMOUNT_OUT_USDT = 101;
 
     event SingleCycleProof(
         uint256 blockNumber,
