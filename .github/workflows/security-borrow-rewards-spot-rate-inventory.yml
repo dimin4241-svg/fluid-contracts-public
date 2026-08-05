@@ -1,0 +1,68 @@
+name: Security BorrowRewards spot-rate inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-borrow-rewards-spot-rate-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RPC_URL: 'https://ethereum-rpc.publicnode.com'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-borrow-rewards
+          python3 - <<'PY'
+          import json,subprocess,time
+          rpc='https://ethereum-rpc.publicnode.com'
+          cs=[
+            ('WBTC-USDC','0x5E5768B6b42c12dA8e75eb0AA6fD47Be33a5b24e'),
+            ('WBTC-USDT','0x6D90d460929b921f6C74838a9d25CC69B486D605'),
+            ('cbBTC-USDC','0x7110cED08f0E26c14a2eF7A980c4F17C70aBa7c0'),
+            ('cbBTC-USDT','0xf5fD6c6f936689018215CB10d7a5b99A43a39D28'),
+          ]
+          def call(a,s):
+            return subprocess.check_output(['cast','call',a,s,'--rpc-url',rpc],text=True,stderr=subprocess.STDOUT).strip().split()[0]
+          block=int(subprocess.check_output(['cast','block-number','--rpc-url',rpc],text=True).strip())
+          rows=[]
+          for name,a in cs:
+            r={'name':name,'address':a,'block':block}
+            for k,s in [
+              ('ended','ended()(bool)'),('startTime','startTime()(uint40)'),('endTime','endTime()(uint40)'),
+              ('currentMagnifier','currentBorrowMagnifier()(uint256)'),('vaultBorrowTVL','vaultBorrowTVL()(uint256)'),
+              ('borrowRate','getBorrowRate()(uint256)'),('vault','VAULT()(address)'),('debtToken','VAULT_DEBT_TOKEN()(address)'),
+              ('reserve','RESERVE_CONTRACT()(address)'),('initiator','INITIATOR()(address)')
+            ]:
+              try:r[k]=call(a,s)
+              except subprocess.CalledProcessError as e:r[k]='ERROR:'+e.output[-400:]
+            try:r['calculateRaw']=subprocess.check_output(['cast','call',a,'calculateBorrowMagnifier()((uint256,bool))','--rpc-url',rpc],text=True,stderr=subprocess.STDOUT).strip()
+            except subprocess.CalledProcessError as e:r['calculateRaw']='ERROR:'+e.output[-400:]
+            rows.append(r)
+          open('evidence-borrow-rewards/live-state.json','w').write(json.dumps(rows,indent=2))
+          for r in rows:print(json.dumps(r,sort_keys=True))
+          PY
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: borrow-rewards-spot-rate-inventory
+          path: evidence-borrow-rewards/
+          if-no-files-found: error
+          retention-days: 30
