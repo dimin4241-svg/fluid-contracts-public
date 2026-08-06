@@ -1,0 +1,90 @@
+name: Security Plasma Vault T4 event inventory
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - '.github/workflows/security-plasma-vault-t4-event-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      VAULT_FACTORY: 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Recover all VaultT4 deployments from factory logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-plasma-vault-t4-events
+          OUT=evidence-plasma-vault-t4-events/vault-t4-events.csv
+          RAW=evidence-plasma-vault-t4-events/raw.jsonl
+          SUMMARY=evidence-plasma-vault-t4-events/summary.log
+          echo 'blockNumber,txHash,logIndex,vaultId,vault,smartCol,smartDebt' > "$OUT"
+          : > "$RAW"
+
+          latest=$(cast block-number --rpc-url "$PLASMA_RPC_URL")
+          topic0=$(cast keccak 'VaultT4Deployed(address,uint256,address,address)')
+          chunk=500000
+
+          echo "chainId=$(cast chain-id --rpc-url "$PLASMA_RPC_URL")" | tee "$SUMMARY"
+          echo "latestBlock=$latest" | tee -a "$SUMMARY"
+          echo "factory=$VAULT_FACTORY" | tee -a "$SUMMARY"
+          echo "topic0=$topic0" | tee -a "$SUMMARY"
+
+          for ((from=0; from<=latest; from+=chunk)); do
+            to=$((from + chunk - 1))
+            if ((to > latest)); then to=$latest; fi
+            from_hex=$(printf '0x%x' "$from")
+            to_hex=$(printf '0x%x' "$to")
+            filter=$(jq -nc \
+              --arg address "$VAULT_FACTORY" \
+              --arg fromBlock "$from_hex" \
+              --arg toBlock "$to_hex" \
+              --arg topic0 "$topic0" \
+              '{address:$address,fromBlock:$fromBlock,toBlock:$toBlock,topics:[$topic0]}')
+
+            response=$(cast rpc --rpc-url "$PLASMA_RPC_URL" eth_getLogs "$filter")
+            echo "$response" | jq -c '.[]' >> "$RAW"
+          done
+
+          jq -r '
+            [
+              (.blockNumber | tonumber),
+              .transactionHash,
+              (.logIndex | tonumber),
+              (.data | tonumber),
+              ("0x" + (.topics[1][-40:])),
+              ("0x" + (.topics[2][-40:])),
+              ("0x" + (.topics[3][-40:]))
+            ] | @csv
+          ' "$RAW" >> "$OUT"
+
+          count=$(wc -l < "$OUT")
+          count=$((count - 1))
+          echo "t4DeploymentCount=$count" | tee -a "$SUMMARY"
+          cat "$OUT" | tee -a "$SUMMARY"
+          test "$count" -gt 0
+
+      - name: Upload event evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-event-inventory
+          path: evidence-plasma-vault-t4-events/
+          if-no-files-found: error
+          retention-days: 30
