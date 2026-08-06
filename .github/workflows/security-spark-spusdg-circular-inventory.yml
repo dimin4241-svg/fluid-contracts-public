@@ -1,0 +1,103 @@
+name: Security Spark spUSDG circular inventory
+
+on:
+  push:
+    branches: [audit/sky-ilk-registry-race-runner-20260806]
+    paths: ['.github/workflows/security-spark-spusdg-circular-inventory.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query production vault and Morpho topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          endpoints=(https://ethereum-rpc.publicnode.com https://eth.drpc.org https://mainnet.gateway.tenderly.co https://eth-mainnet.public.blastapi.io)
+          rpc=''
+          for x in "${endpoints[@]}"; do if cast block-number --rpc-url "$x" >/dev/null 2>&1; then rpc="$x"; break; fi; done
+          test -n "$rpc"
+
+          SPUSDG=0xde770c84FE66E063336b31737cFE9790f18c4087
+          USDG=0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168
+          META=0xBEEff039907422219Fb367e525954DDC092854d9
+          ALM_PROXY=0xfD2fD4B046136B540A56C11c75ac679AE7d1dB24
+          CONTROLLER=0xcf8d58A6eeF2a1cae2Ce69bC463b1178FB76bA1E
+          RATE_LIMITS=0x5c1fDE9d4C7f1BF4bc5dEAA2a7752e56232c68a0
+          EXECUTOR=0x826AEaeee9233fA8Ba199518dd8621A5962b1D02
+          OPS=0x59C85fe4385403e93877e48e5521f2F02B150359
+          RELAYER2=0x0ca8f938Aba2214eA11eb451e795A8ef7B720C18
+          SETTER=$(cast keccak SETTER_ROLE)
+          TAKER=$(cast keccak TAKER_ROLE)
+          RELAYER=$(cast keccak RELAYER)
+          DEFAULT=0x0000000000000000000000000000000000000000000000000000000000000000
+
+          {
+            echo rpc=$rpc
+            echo block=$(cast block-number --rpc-url "$rpc")
+            echo '=== spUSDG state ==='
+            for sig in \
+              'asset()(address)' 'getImplementation()(address)' 'decimals()(uint8)' \
+              'depositCap()(uint256)' 'totalSupply()(uint256)' 'totalAssets()(uint256)' \
+              'assetsOutstanding()(uint256)' 'chi()(uint192)' 'rho()(uint64)' \
+              'vsr()(uint256)' 'minVsr()(uint256)' 'maxVsr()(uint256)'; do
+              echo -n "$sig "; cast call $SPUSDG "$sig" --rpc-url "$rpc"
+            done
+            echo -n 'USDG liquidity '; cast call $USDG 'balanceOf(address)(uint256)' $SPUSDG --rpc-url "$rpc"
+            echo -n 'USDG ALM balance '; cast call $USDG 'balanceOf(address)(uint256)' $ALM_PROXY --rpc-url "$rpc"
+            echo
+            echo '=== role holders ==='
+            for role in $DEFAULT $SETTER $TAKER; do
+              n=$(cast call $SPUSDG 'getRoleMemberCount(bytes32)(uint256)' $role --rpc-url "$rpc")
+              echo "vault role=$role count=$n"
+              for ((i=0;i<n;i++)); do cast call $SPUSDG 'getRoleMember(bytes32,uint256)(address)' $role $i --rpc-url "$rpc"; done
+            done
+            n=$(cast call $CONTROLLER 'getRoleMemberCount(bytes32)(uint256)' $RELAYER --rpc-url "$rpc")
+            echo "controller relayers count=$n"
+            for ((i=0;i<n;i++)); do cast call $CONTROLLER 'getRoleMember(bytes32,uint256)(address)' $RELAYER $i --rpc-url "$rpc"; done
+            echo '=== code sizes and Safe hints ==='
+            for a in $EXECUTOR $OPS $RELAYER2 $ALM_PROXY $CONTROLLER $RATE_LIMITS; do
+              code=$(cast code $a --rpc-url "$rpc"); echo "$a $(((${#code}-2)/2))"
+              cast call $a 'masterCopy()(address)' --rpc-url "$rpc" 2>/dev/null || true
+              cast call $a 'getThreshold()(uint256)' --rpc-url "$rpc" 2>/dev/null || true
+            done
+            echo
+            echo '=== MetaMorpho vault ==='
+            for sig in 'asset()(address)' 'MORPHO()(address)' 'totalAssets()(uint256)' 'totalSupply()(uint256)' 'withdrawQueueLength()(uint256)' 'supplyQueueLength()(uint256)'; do
+              echo -n "$sig "; cast call $META "$sig" --rpc-url "$rpc" || true
+            done
+            MORPHO=$(cast call $META 'MORPHO()(address)' --rpc-url "$rpc")
+            echo MORPHO=$MORPHO
+            wl=$(cast call $META 'withdrawQueueLength()(uint256)' --rpc-url "$rpc")
+            echo '=== withdraw queue markets ==='
+            for ((i=0;i<wl;i++)); do
+              id=$(cast call $META 'withdrawQueue(uint256)(bytes32)' $i --rpc-url "$rpc")
+              echo "index=$i id=$id"
+              cast call $MORPHO 'idToMarketParams(bytes32)(address,address,address,address,uint256)' $id --rpc-url "$rpc" || true
+              cast call $MORPHO 'market(bytes32)(uint128,uint128,uint128,uint128,uint128,uint128)' $id --rpc-url "$rpc" || true
+              cast call $META 'config(bytes32)(uint184,bool,uint64)' $id --rpc-url "$rpc" || true
+            done
+            sl=$(cast call $META 'supplyQueueLength()(uint256)' --rpc-url "$rpc")
+            echo '=== supply queue markets ==='
+            for ((i=0;i<sl;i++)); do
+              id=$(cast call $META 'supplyQueue(uint256)(bytes32)' $i --rpc-url "$rpc")
+              echo "index=$i id=$id"
+              cast call $MORPHO 'idToMarketParams(bytes32)(address,address,address,address,uint256)' $id --rpc-url "$rpc" || true
+              cast call $MORPHO 'market(bytes32)(uint128,uint128,uint128,uint128,uint128,uint128)' $id --rpc-url "$rpc" || true
+              cast call $META 'config(bytes32)(uint184,bool,uint64)' $id --rpc-url "$rpc" || true
+            done
+          } | tee evidence/inventory.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spark-spusdg-circular-inventory
+          path: evidence/
+          retention-days: 30
