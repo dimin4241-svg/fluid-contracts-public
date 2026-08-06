@@ -1,0 +1,130 @@
+name: Security Sky governance veto validation v4
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-governance-veto-v4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Build standard compiler
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -o pipefail
+          mkdir -p ../evidence-sky-governance-veto-v4
+          forge build 2>&1 | tee ../evidence-sky-governance-veto-v4/forge-build.log
+
+      - name: Run focused positive and adversarial controls
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -uo pipefail
+          OUT=../evidence-sky-governance-veto-v4
+          : > "$OUT/forge-test.log"
+          endpoints=(
+            'https://mainnet.gateway.tenderly.co'
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://rpc.payload.de'
+            'https://eth-mainnet.public.blastapi.io'
+          )
+
+          run_case() {
+            local label="$1"
+            shift
+            local tmp="$OUT/${label}.log"
+            local rpc rc
+            for rpc in "${endpoints[@]}"; do
+              echo "=== $label via $rpc ===" | tee -a "$OUT/forge-test.log"
+              set +e
+              ETH_RPC_URL="$rpc" forge test --threads 1 "$@" -vvvv > "$tmp" 2>&1
+              rc=$?
+              set -e
+              cat "$tmp" | tee -a "$OUT/forge-test.log"
+              if [[ "$rc" == 0 ]] && grep -q '\[PASS\]' "$tmp"; then
+                echo "CASE_PASS $label rpc=$rpc" | tee -a "$OUT/forge-test.log"
+                return 0
+              fi
+              if grep -qiE '429|rate limit|Max retries exceeded|failed to send/recv|database error|error sending request|failed to create fork' "$tmp"; then
+                echo "RPC_RETRY $label rpc=$rpc" | tee -a "$OUT/forge-test.log"
+                sleep 3
+                continue
+              fi
+              echo "CASE_FAIL_NON_RPC $label rpc=$rpc" | tee -a "$OUT/forge-test.log"
+              return 1
+            done
+            echo "CASE_FAIL_ALL_RPCS $label" | tee -a "$OUT/forge-test.log"
+            return 1
+          }
+
+          run_case atomic-real-spell-reversal \
+            --match-path src/IlkRegistryAtomicGovernanceReversal.t.sol \
+            --match-test testOneUnprivilegedTransactionCastsSpellAndReversesCleanup || exit 1
+          sleep 3
+
+          run_case current-exact-addability \
+            --match-path src/IlkRegistryCurrentMassReAdd.t.sol \
+            --match-test testCurrentMainnetOneTransactionRestoresExactly31RemovedIlks || exit 1
+          sleep 3
+
+          run_case repeated-governance-veto \
+            --match-path src/IlkRegistryGovernanceRemovalVeto.t.sol \
+            --match-test testPublicCallerCanVetoRepeatedGovernanceRemovalCycles || exit 1
+          sleep 3
+
+          run_case persistence-and-mitigation \
+            --match-path src/IlkRegistryPersistence.t.sol || exit 1
+          sleep 3
+
+          run_case direct-oracle-causality-control \
+            --match-path src/IlkRegistryDirectSpotterSingleControl.t.sol \
+            --match-test testDirectPublicOracleAndSpotterPathMatchesRegistryOmegaResult || exit 1
+          sleep 3
+
+          run_case residual-debt-negative-control \
+            --match-path src/IlkRegistryCurrentMassReAdd.t.sol \
+            --match-test testRwaAdaptersWithResidualArtAreNotPermissionlesslyAddable || exit 1
+
+      - name: Extract focused summary
+        if: always()
+        shell: bash
+        run: |
+          OUT=evidence-sky-governance-veto-v4
+          {
+            echo '--- build ---'
+            grep -E '(Compiling|Compiler run successful|Error:|Warning)' "$OUT/forge-build.log" 2>/dev/null || true
+            echo '--- cases ---'
+            grep -E '(CASE_PASS|CASE_FAIL|RPC_RETRY|\[PASS\]|\[FAIL\]|spell done|restored atomically|final registry count|governance removeAuth cycles|successful unprivileged re-adds|final AAVE-A|total attacker add gas|public removals blocked|AAVE Join external collateral balance|direct oracle plus Spotter result|Registry plus Omega result|final values equal|RWA012 Art|RWA013 Art)' "$OUT/forge-test.log" 2>/dev/null || true
+          } | tee "$OUT/summary.log"
+
+      - name: Upload focused evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-governance-veto-validation-v4
+          path: evidence-sky-governance-veto-v4/
+          if-no-files-found: error
+          retention-days: 30
