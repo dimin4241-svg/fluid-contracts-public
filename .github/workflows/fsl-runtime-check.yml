@@ -1,10 +1,8 @@
 name: fSL runtime on-chain check
 
 on:
-  push:
+  pull_request:
     branches: [main]
-    paths:
-      - '.github/workflows/fsl-runtime-check.yml'
   workflow_dispatch:
 
 permissions:
