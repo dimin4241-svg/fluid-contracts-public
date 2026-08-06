@@ -1,0 +1,57 @@
+name: Plasma one-sided isolated
+
+on:
+  push:
+    branches:
+      - audit/plasma-one-sided-isolated-20260806
+    paths:
+      - 'test/security/PlasmaOneSidedBorrowIsolated.t.sol'
+      - '.github/workflows/plasma-one-sided-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated root
+        shell: bash
+        run: |
+          rm -rf audit/isolated
+          mkdir -p audit/isolated/test audit/isolated/lib evidence-isolated
+          cp test/security/PlasmaOneSidedBorrowIsolated.t.sol audit/isolated/test/
+          cp -R lib/forge-std audit/isolated/lib/forge-std
+      - name: Run fork probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/isolated --via-ir \
+            --match-contract PlasmaOneSidedBorrowIsolatedTest \
+            --match-test test_oneSidedBorrowIsolated -vvvv 2>&1 \
+            | tee evidence-isolated/probe.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(IsolatedReachability|IsolatedDeposit|IsolatedBorrow|IsolatedLiquidation)\(|Suite result|Failing tests|Error:|revert' evidence-isolated/probe.log | tee evidence-isolated/summary.log || true
+          git rev-parse HEAD > evidence-isolated/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-one-sided-isolated
+          path: evidence-isolated/
+          if-no-files-found: error
+          retention-days: 30
