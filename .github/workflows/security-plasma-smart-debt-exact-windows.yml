@@ -1,5 +1,6 @@
 name: Security Plasma Smart Debt exact Windows
 
+# PR-only marker keeps this branch diff non-empty so the Windows proof is scheduled.
 on:
   push:
     branches:
