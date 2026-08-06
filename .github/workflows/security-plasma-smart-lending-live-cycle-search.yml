@@ -34,14 +34,22 @@ jobs:
         run: |
           echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
 
+      - name: Prepare isolated cycle-search harness
+        shell: bash
+        run: |
+          rm -rf audit/live-cycle-poc
+          mkdir -p audit/live-cycle-poc/test audit/live-cycle-poc/lib evidence-smart-lending-live-cycle
+          cp test/security/PlasmaSmartLendingLiveCycleSearch.t.sol audit/live-cycle-poc/test/
+          cp -R lib/forge-std audit/live-cycle-poc/lib/forge-std
+
       - name: Run exact-output cycle grid on live wrapper pools
         shell: bash
         run: |
-          mkdir -p evidence-smart-lending-live-cycle
           set -o pipefail
           forge test \
+            --root audit/live-cycle-poc \
             --via-ir \
-            --match-path test/security/PlasmaSmartLendingLiveCycleSearch.t.sol \
+            --match-path test/PlasmaSmartLendingLiveCycleSearch.t.sol \
             -vvvv 2>&1 | tee evidence-smart-lending-live-cycle/live-cycle.log
 
       - name: Extract evidence summary
