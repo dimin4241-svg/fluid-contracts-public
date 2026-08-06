@@ -1,4 +1,4 @@
-name: Security Sky build submission package
+name: Security Sky build submission package v3
 
 on:
   push:
@@ -15,10 +15,19 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 240
     env:
       GH_TOKEN: ${{ github.token }}
+      CANONICAL_RUN: '31089226913'
     steps:
+      - name: Wait for canonical validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run watch "$CANONICAL_RUN" \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --exit-status
+
       - name: Checkout PoC branch
         uses: actions/checkout@v4
         with:
@@ -27,14 +36,14 @@ jobs:
           path: poc
           submodules: false
 
-      - name: Checkout exact upstream references
+      - name: Checkout exact IlkRegistry source
         uses: actions/checkout@v4
         with:
           repository: sky-ecosystem/ilk-registry
           ref: 1d65fb6e17c28e9e94ac88f0d8ccad04d8945f3c
           path: upstream/ilk-registry
 
-      - name: Checkout exact spell archive
+      - name: Checkout exact governance spell archive
         uses: actions/checkout@v4
         with:
           repository: sky-ecosystem/spells-mainnet
@@ -48,30 +57,39 @@ jobs:
           ref: 83bd1a6dceba1bcc28eaa54ccd8b8afdbde6fcb5
           path: upstream/megapoker
 
-      - name: Checkout exact governance proposal archive
+      - name: Checkout exact executive proposal archive
         uses: actions/checkout@v4
         with:
           repository: sky-ecosystem/executive-votes
           ref: 5f326b5158efd320d2ca1fe6c6cbaafa7664a70f
           path: upstream/executive-votes
 
+      - name: Checkout exact deployed emergency-spell source
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/dss-emergency-spells
+          ref: 45651a4ecee20b80e55d941d295dbdf6fa4ea5e6
+          path: upstream/dss-emergency-spells
+
+      - name: Checkout DSS source reference
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/dss
+          ref: fa4f6630afb0624d04a003e920b0d71a00331d98
+          path: upstream/dss
+
       - name: Assemble package tree
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-terminal-offboarding-validation-v2"
-          mkdir -p "$ROOT"/{report,source,references,evidence/canonical,evidence/omega-exact,evidence/architectural-negative-control}
+          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-governance-retirement-validation-v3"
+          mkdir -p "$ROOT"/{report,source,references,evidence/canonical,evidence/atomic-retirement,evidence/chainlog-differential,evidence/emergency-reopening,evidence/staged-emergency}
 
           cp poc/evidence/IMMUNEFI_REPORT.md "$ROOT/report/"
           cp poc/evidence/TRIAGE_OBJECTION_MATRIX.md "$ROOT/report/"
           cp poc/evidence/VALIDATION_SUMMARY.md "$ROOT/report/"
 
-          cp poc/src/IlkRegistryAtomicGovernanceReversal.t.sol "$ROOT/source/"
-          cp poc/src/IlkRegistryMassReAdd.t.sol "$ROOT/source/"
-          cp poc/src/IlkRegistryCurrentMassReAdd.t.sol "$ROOT/source/"
-          cp poc/src/IlkRegistryOmegaPokerImpact.t.sol "$ROOT/source/"
-          cp poc/src/IlkRegistryPersistence.t.sol "$ROOT/source/"
-          cp poc/src/IlkRegistryKeeperGas.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistry*.t.sol "$ROOT/source/"
           cp poc/foundry.toml "$ROOT/source/"
           cp poc/.gitmodules "$ROOT/source/"
 
@@ -82,26 +100,42 @@ jobs:
           cp upstream/spells-mainnet/archive/2025-08-07-DssSpell/DssSpell.t.sol "$ROOT/references/2025-08-07-DssSpell.official-test.sol"
           cp upstream/megapoker/src/OmegaPoker.sol "$ROOT/references/OmegaPoker.sol"
           cp 'upstream/executive-votes/2025/executive-vote-2025-08-07-deactivate-morpho-ddm-chainlog-management.md' "$ROOT/references/2025-08-07-governance-proposal.md"
+          cp upstream/dss-emergency-spells/README.md "$ROOT/references/DssEmergencySpells.README.md"
+          cp upstream/dss-emergency-spells/src/DssEmergencySpell.sol "$ROOT/references/DssEmergencySpell.sol"
+          cp upstream/dss-emergency-spells/src/osm-stop/MultiOsmStopSpell.sol "$ROOT/references/MultiOsmStopSpell.sol"
+          cp upstream/dss-emergency-spells/src/clip-breaker/MultiClipBreakerSpell.sol "$ROOT/references/MultiClipBreakerSpell.sol"
+          cp upstream/dss/src/spot.sol "$ROOT/references/Spotter.sol"
+          cp upstream/dss/src/clip.sol "$ROOT/references/Clipper.sol"
 
-          gh run download 31084566815 \
+          gh run download "$CANONICAL_RUN" \
             --repo dimin4241-svg/fluid-contracts-public \
-            --name sky-canonical-ilk-registry-validation \
+            --name sky-canonical-governance-retirement-validation-v3 \
             --dir "$ROOT/evidence/canonical"
 
-          gh run download 31084770021 \
+          gh run download 31087775218 \
             --repo dimin4241-svg/fluid-contracts-public \
-            --name sky-omega-poker-exact-downstream-deltas \
-            --dir "$ROOT/evidence/omega-exact"
+            --name sky-atomic-oracle-retirement-proof \
+            --dir "$ROOT/evidence/atomic-retirement"
 
-          gh run download 31083835530 \
+          gh run download 31086708376 \
             --repo dimin4241-svg/fluid-contracts-public \
-            --name sky-2022-registry-list-injection-scan \
-            --dir "$ROOT/evidence/architectural-negative-control"
+            --name sky-chainlog-oracle-retirement-bypass \
+            --dir "$ROOT/evidence/chainlog-differential"
+
+          gh run download 31086518004 \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --name sky-deployed-emergency-registry-impact \
+            --dir "$ROOT/evidence/emergency-reopening"
+
+          gh run download 31088034426 \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --name sky-staged-emergency-reexecution-grief \
+            --dir "$ROOT/evidence/staged-emergency"
 
           cat > "$ROOT/REPRODUCE.md" <<'EOF'
           # Reproduction
 
-          All state-changing tests must be run on a local Ethereum mainnet fork.
+          All state-changing tests must be run only on a local Ethereum mainnet fork.
 
           ```bash
           git clone https://github.com/dimin4241-svg/dss-emergency-spells.git
@@ -112,54 +146,107 @@ jobs:
 
           forge build
 
+          # Strongest historical one-call proof:
+          # real approved spell -> re-add -> Omega -> MCD_VAT
           forge test --threads 1 \
-            --match-path src/IlkRegistryAtomicGovernanceReversal.t.sol \
-            --match-test testOneUnprivilegedTransactionCastsSpellAndReversesCleanup -vvvv
+            --match-path src/IlkRegistryAtomicOracleRetirementProof.t.sol \
+            --match-test testOneExternalCallReactivatesRetiredOraclePathIntoVat \
+            -vvvv
 
+          # Current one-call proof, no historical governance action
           forge test --threads 1 \
-            --match-path src/IlkRegistryCurrentMassReAdd.t.sol -vvvv
+            --match-path src/IlkRegistryCurrentAtomicVatPropagation.t.sol \
+            --match-test testCurrentOneExternalCallRestoresLegacyPathsAndChangesVat \
+            -vvvv
 
+          # Clean-vs-attacked coordinated Chainlog/Registry retirement
           forge test --threads 1 \
-            --match-path src/IlkRegistryOmegaPokerImpact.t.sol \
-            --match-test testMassReAddChangesDeployedOmegaPokerExecution -vvvv
+            --match-path src/IlkRegistryChainlogRetirementBypass.t.sol \
+            --match-test testAtomicReAddBypassesCoordinatedChainlogOracleRetirement \
+            -vvvv
 
+          # Deployed emergency completion reopening
           forge test --threads 1 \
-            --match-path src/IlkRegistryPersistence.t.sol -vvvv
+            --match-path src/IlkRegistryEmergencySpellImpact.t.sol \
+            -vvvv
+
+          # Staged repeated emergency response
+          forge test --threads 1 \
+            --match-path src/IlkRegistryEmergencyReexecutionGrief.t.sol \
+            -vvvv
           ```
 
-          Pinned fork baselines:
+          Pinned baselines:
 
           - block `23,118,263`: Registry count `72`;
           - block `25,694,337`: Registry count `35`.
 
-          Public RPC endpoints may return HTTP 429 during fork tests. The included canonical workflow runs tests sequentially with RPC failover. Use a paid/archive RPC for the most reliable local reproduction.
+          Public RPC endpoints may rate-limit fork tests. The included canonical workflow uses sequential execution and RPC failover. A paid archive RPC is recommended for local reproduction.
           EOF
 
-          cat > "$ROOT/MANIFEST.md" <<'EOF'
+          POC_SHA=$(git -C poc rev-parse HEAD)
+          cat > "$ROOT/MANIFEST.md" <<EOF
           # Manifest
 
-          ## Vulnerable production deployment
+          ## Production deployments
 
           - IlkRegistry: `0x5a464C28D19848f44199D003BeF5ecc87d090F87`
+          - MCD_SPOT: `0x65C79fcB50Ca1594B025960e539eD7A9a6D434A3`
+          - MCD_VAT: `0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B`
           - OmegaPoker: `0xDd538C362dF996727054AC8Fb67ef5394eC9b8b9`
           - 2025 cleanup spell: `0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5`
+          - MultiOsmStopSpell: `0x3021dEdB0bC677F43A23Fcd1dE91A07e5195BaE8`
+          - MultiClipBreakerSpell: `0x828824dBC62Fba126C76E0Abe79AE28E5393C2cb`
 
           ## Pinned source revisions
 
+          - PoC branch head: `$POC_SHA`
           - `sky-ecosystem/ilk-registry`: `1d65fb6e17c28e9e94ac88f0d8ccad04d8945f3c`
           - `sky-ecosystem/spells-mainnet`: `6e90e066cfc2102bc864e23a29f4c744e0a4a1bc`
           - `sky-ecosystem/megapoker`: `83bd1a6dceba1bcc28eaa54ccd8b8afdbde6fcb5`
           - `sky-ecosystem/executive-votes`: `5f326b5158efd320d2ca1fe6c6cbaafa7664a70f`
+          - `sky-ecosystem/dss-emergency-spells`: `45651a4ecee20b80e55d941d295dbdf6fa4ea5e6`
+          - `sky-ecosystem/dss`: `fa4f6630afb0624d04a003e920b0d71a00331d98`
 
-          ## Machine-validation runs
+          ## Machine validation
 
-          - Canonical sequential suite: `31084566815`
-          - Exact OmegaPoker/Vat deltas: `31084770021`
-          - 2022 architectural negative control: `31083835530`
+          - Canonical v3 suite: `$CANONICAL_RUN`
+          - Atomic retirement-to-Vat proof: `31087775218`
+          - Differential Chainlog bypass: `31086708376`
+          - Deployed emergency reopening: `31086518004`
+          - Staged emergency re-execution: `31088034426`
+          - Current one-call Vat proof: `31088226922`, final successful attempt
 
-          ## Excluded claims
+          ## Scope framing
 
-          The package does not claim theft, insolvency, debt reopening, residual-Art RWA re-addition, keeper payout extraction, block-gas DoS, historical pre-remove race, or alternate-gem Join substitution.
+          The root cause is in IlkRegistry. The primary PoCs propagate into explicitly listed Sky assets `MCD_SPOT`, OSM paths, and `MCD_VAT`. The submitted impact is governance-result deviation.
+
+          ## Explicit non-claims
+
+          No theft, insolvency, debt reopening, active-auction loss, residual AutoLine reopening, block-gas DoS, historical pre-remove race, or malicious alternate-Join substitution is claimed.
+          EOF
+
+          cat > "$ROOT/SCOPE_MAPPING.md" <<'EOF'
+          # Scope mapping
+
+          Snapshot date: 2026-08-06.
+
+          The Sky Immunefi program was last updated on 2026-07-21, requires a PoC, uses Primacy of Rules, and lists the following relevant smart-contract assets:
+
+          - MCD_SPOT
+          - MCD_VAT
+          - Medians
+          - OSM
+
+          Selected impact:
+
+          > Manipulation of governance voting result deviating from voted outcome and resulting in a direct change from intended effect of original results
+
+          Program page:
+
+          `https://immunefi.com/bug-bounty/sky/scope/`
+
+          The report does not rely on governance approval of malicious code and does not require attacker access to a privileged address.
           EOF
 
           cat > "$ROOT/verify.py" <<'PY'
@@ -198,23 +285,40 @@ jobs:
           required = {
               "evidence/canonical/summary.log": [
                   "Compiler run successful!",
-                  "CASE_PASS atomic-governance-reversal",
-                  "CASE_PASS current-exact-restoration",
+                  "CASE_PASS atomic-oracle-retirement",
+                  "CASE_PASS current-one-call-vat",
+                  "CASE_PASS chainlog-retirement-differential",
+                  "CASE_PASS emergency-osm-reopening",
+                  "CASE_PASS emergency-clip-reopening",
+                  "CASE_PASS staged-osm-reexecution",
+                  "CASE_PASS staged-clip-reexecution",
                   "CASE_PASS residual-art-negative-control",
-                  "CASE_PASS omega-poker-downstream",
-                  "CASE_PASS persistence-and-mitigation",
+                  "CASE_PASS current-public-removal-negative",
+                  "CASE_PASS residual-automation-negative",
+                  "CASE_PASS legacy-auction-negative",
                   "CASE_PASS keeper-bounded-impact",
               ],
-              "evidence/omega-exact/summary.log": [
-                  "[PASS] testMassReAddChangesDeployedOmegaPokerExecution()",
-                  "attacked Omega ilk count 38",
-                  "attacked Omega OSM count 32",
-                  "legacy Vat spots changed by poke 15",
+              "evidence/atomic-retirement/key-results.log": [
+                  "approved spell done true",
+                  "Chainlog keys still retired 8",
+                  "Registry ilks restored in same call 31",
+                  "retired ilks recached in same call 7",
+                  "retired Vat.spot values changed in same call 2",
+                  "end-to-end call gas used 13401327",
+              ],
+              "evidence/emergency-reopening/key-results.log": [
+                  "new pending OSM obligations 25",
+                  "new pending Clip obligations 30",
+                  "done after restoration false",
+              ],
+              "evidence/staged-emergency/key-results.log": [
+                  "forced OSM emergency re-executions 25",
+                  "forced Clip emergency re-executions 30",
               ],
               "report/IMMUNEFI_REPORT.md": [
-                  "restored atomically 31",
-                  "No malicious governance proposal",
-                  "The report does **not** claim",
+                  "Permissionless IlkRegistry add atomically defeats coordinated governance oracle retirement",
+                  "current retired Vat.spot values changed 15",
+                  "The following were explicitly tested and are **not** claimed",
               ],
           }
 
@@ -228,6 +332,17 @@ jobs:
                   if needle not in text:
                       errors.append(f"missing evidence marker in {rel}: {needle}")
 
+          source_names = {p.name for p in (root / "source").glob("*.t.sol")}
+          for required_source in {
+              "IlkRegistryAtomicOracleRetirementProof.t.sol",
+              "IlkRegistryCurrentAtomicVatPropagation.t.sol",
+              "IlkRegistryChainlogRetirementBypass.t.sol",
+              "IlkRegistryEmergencySpellImpact.t.sol",
+              "IlkRegistryEmergencyReexecutionGrief.t.sol",
+          }:
+              if required_source not in source_names:
+                  errors.append(f"primary PoC source missing: {required_source}")
+
           if errors:
               print("VALIDATION FAILED")
               for error in errors:
@@ -235,15 +350,15 @@ jobs:
               sys.exit(1)
 
           print("VALIDATION PASSED")
-          print("All hashes, required evidence markers, and falsified-artifact exclusions passed.")
+          print("Hashes, primary evidence markers, source presence, and falsified-artifact exclusions passed.")
           PY
           chmod +x "$ROOT/verify.py"
 
           (
             cd "$ROOT"
-            find . -type f \
-              ! -name SHA256SUMS.txt \
-              -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            find . -type f ! -name SHA256SUMS.txt -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > SHA256SUMS.txt
             python3 verify.py
           )
 
@@ -251,19 +366,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-terminal-offboarding-validation-v2"
+          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-governance-retirement-validation-v3"
           find "$ROOT" -exec touch -h -t 202608060000.00 {} +
           cd "$GITHUB_WORKSPACE"
-          zip -X -q -r sky-ilk-registry-terminal-offboarding-validation-v2.zip \
-            sky-ilk-registry-terminal-offboarding-validation-v2
-          sha256sum sky-ilk-registry-terminal-offboarding-validation-v2.zip | tee PACKAGE_SHA256.txt
+          zip -X -q -r sky-ilk-registry-governance-retirement-validation-v3.zip \
+            sky-ilk-registry-governance-retirement-validation-v3
+          sha256sum sky-ilk-registry-governance-retirement-validation-v3.zip \
+            | tee PACKAGE_SHA256.txt
 
       - name: Upload submission package
         uses: actions/upload-artifact@v4
         with:
-          name: sky-ilk-registry-terminal-offboarding-validation-v2
+          name: sky-ilk-registry-governance-retirement-validation-v3
           path: |
-            sky-ilk-registry-terminal-offboarding-validation-v2.zip
+            sky-ilk-registry-governance-retirement-validation-v3.zip
             PACKAGE_SHA256.txt
           if-no-files-found: error
           retention-days: 30
