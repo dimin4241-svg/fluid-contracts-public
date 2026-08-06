@@ -1,0 +1,89 @@
+name: Security Sky emergency Registry impact
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-emergency-registry-impact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  emergency-impact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Run deployed emergency spell proofs with RPC failover
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence-sky-emergency-impact
+          endpoints=(
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://mainnet.gateway.tenderly.co'
+            'https://eth-mainnet.public.blastapi.io'
+            'https://rpc.payload.de'
+          )
+          tests=(
+            testPostExecutionReAddReopensDeployedMultiOsmStopCompletion
+            testPostExecutionReAddReopensDeployedMultiClipBreakerCompletion
+          )
+
+          forge build 2>&1 | tee ../evidence-sky-emergency-impact/forge-build.log
+
+          for test_name in "${tests[@]}"; do
+            passed=0
+            for rpc in "${endpoints[@]}"; do
+              log="../evidence-sky-emergency-impact/${test_name}.log"
+              echo "RUN test=$test_name rpc=$rpc" | tee -a ../evidence-sky-emergency-impact/attempts.log
+              set +e
+              ETH_RPC_URL="$rpc" forge test \
+                --match-path src/IlkRegistryEmergencySpellImpact.t.sol \
+                --match-test "$test_name" \
+                -vvvv > "$log" 2>&1
+              rc=$?
+              set -e
+              cat "$log"
+              if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
+                echo "CASE_PASS $test_name rpc=$rpc" | tee -a ../evidence-sky-emergency-impact/summary.log
+                passed=1
+                break
+              fi
+              echo "CASE_RETRY $test_name rpc=$rpc rc=$rc" | tee -a ../evidence-sky-emergency-impact/summary.log
+            done
+            if [[ $passed -ne 1 ]]; then
+              echo "CASE_FAIL $test_name" | tee -a ../evidence-sky-emergency-impact/summary.log
+              exit 1
+            fi
+          done
+
+          grep -hE '(pending restored|restored legacy ilks|new pending|done after restoration|emergency schedule gas|re-execution gas|block gas limit|PASS|Suite result)' \
+            ../evidence-sky-emergency-impact/test*.log \
+            | tee ../evidence-sky-emergency-impact/key-results.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-deployed-emergency-registry-impact
+          path: evidence-sky-emergency-impact/
+          if-no-files-found: error
+          retention-days: 30
