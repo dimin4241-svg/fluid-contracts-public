@@ -1,0 +1,30 @@
+name: Plasma vault inventory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/security/inventory_plasma_vaults.py'
+      - '.github/workflows/plasma-vault-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install web3 eth-abi eth-utils
+      - name: Inventory live Plasma vaults
+        run: python scripts/security/inventory_plasma_vaults.py | tee plasma-vault-inventory.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-inventory
+          path: |
+            plasma-vault-inventory.json
+            plasma-vault-inventory.log
