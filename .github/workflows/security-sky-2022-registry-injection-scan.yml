@@ -1,0 +1,140 @@
+name: Security Sky 2022 Registry list injection scan
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-2022-registry-injection-scan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout complete Sky spell archive
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/spells-mainnet
+          ref: master
+          path: spells-mainnet
+          fetch-depth: 1
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Select archive RPC and resolve real cast block
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-sky-2022-registry-injection
+          TX=0xd891445bf62cb9df39a07be390f2650be820d4cb2c8efe51b4506e1763435f97
+          endpoints=(
+            'https://eth-mainnet.public.blastapi.io'
+            'https://mainnet.gateway.tenderly.co'
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://rpc.payload.de'
+          )
+          for rpc in "${endpoints[@]}"; do
+            receipt=$(timeout 30 cast receipt "$TX" --json --rpc-url "$rpc" 2>/dev/null || true)
+            [[ -n "$receipt" ]] || continue
+            block_hex=$(printf '%s' "$receipt" | jq -r '.blockNumber // empty')
+            [[ "$block_hex" =~ ^0x[0-9a-fA-F]+$ ]] || continue
+            block=$((block_hex))
+            pre=$((block - 1))
+            count=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block "$pre" --rpc-url "$rpc" 2>/dev/null || true)
+            [[ "$count" =~ ^[0-9]+ ]] || continue
+            echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
+            echo "CAST_BLOCK=$block" >> "$GITHUB_ENV"
+            echo "PRE_CAST_BLOCK=$pre" >> "$GITHUB_ENV"
+            {
+              echo "selected=$rpc"
+              echo "cast_tx=$TX"
+              echo "cast_block=$block"
+              echo "pre_cast_block=$pre"
+              echo "pre_cast_registry_count=$count"
+            } | tee evidence-sky-2022-registry-injection/rpc-and-block.log
+            exit 0
+          done
+          exit 1
+
+      - name: Extract historical Join addresses
+        shell: bash
+        run: |
+          python3 - <<'PY' > evidence-sky-2022-registry-injection/addresses.txt
+          from pathlib import Path
+          import re
+          addrs = set()
+          pats = [
+              re.compile(r'address(?:\s+(?:public|internal|private))?\s+constant\s+[A-Z0-9_]*JOIN[A-Z0-9_]*\s*=\s*(0x[0-9a-fA-F]{40})'),
+              re.compile(r'[A-Z0-9_]*JOIN[A-Z0-9_]*\s*=\s*(0x[0-9a-fA-F]{40})'),
+          ]
+          for p in Path('spells-mainnet').rglob('*.sol'):
+              text = p.read_text(errors='ignore')
+              for pat in pats:
+                  addrs.update(x.lower() for x in pat.findall(text))
+          for addr in sorted(a for a in addrs if a != '0x0000000000000000000000000000000000000000'):
+              print(addr)
+          PY
+          echo "historical_join_addresses=$(wc -l < evidence-sky-2022-registry-injection/addresses.txt)" | tee -a evidence-sky-2022-registry-injection/rpc-and-block.log
+
+      - name: Simulate attacker additions immediately before real cast
+        shell: bash
+        run: |
+          set -euo pipefail
+          REG=0x5a464C28D19848f44199D003BeF5ecc87d090F87
+          VAT=0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
+          ATTACKER=0x000000000000000000000000000000000000bEEF
+          ZERO=0x0000000000000000000000000000000000000000
+          : > evidence-sky-2022-registry-injection/addable-before-cast.txt
+          echo 'adapter,ilk,live,registry_join,simulation,detail' > evidence-sky-2022-registry-injection/state.csv
+
+          while read -r adapter; do
+            vat=$(timeout 20 cast call "$adapter" 'vat()(address)' --block "$PRE_CAST_BLOCK" --rpc-url "$ETH_RPC_URL" 2>/dev/null || true)
+            [[ "${vat,,}" == "${VAT,,}" ]] || continue
+            ilk=$(timeout 20 cast call "$adapter" 'ilk()(bytes32)' --block "$PRE_CAST_BLOCK" --rpc-url "$ETH_RPC_URL" 2>/dev/null || true)
+            [[ "$ilk" =~ ^0x[0-9a-fA-F]{64}$ ]] || continue
+            live=$(timeout 20 cast call "$adapter" 'live()(uint256)' --block "$PRE_CAST_BLOCK" --rpc-url "$ETH_RPC_URL" 2>/dev/null | awk '{print $1}' || true)
+            regjoin=$(timeout 20 cast call "$REG" 'join(bytes32)(address)' "$ilk" --block "$PRE_CAST_BLOCK" --rpc-url "$ETH_RPC_URL" 2>/dev/null || true)
+            [[ "${regjoin,,}" == "${ZERO,,}" ]] || {
+              echo "$adapter,$ilk,${live:-?},${regjoin:-?},ALREADY_PRESENT," >> evidence-sky-2022-registry-injection/state.csv
+              continue
+            }
+
+            simulation=REVERT
+            detail=''
+            for attempt in 1 2 3; do
+              if detail=$(timeout 35 cast call "$REG" 'add(address)' "$adapter" --from "$ATTACKER" --block "$PRE_CAST_BLOCK" --rpc-url "$ETH_RPC_URL" 2>&1); then
+                simulation=SUCCESS
+                break
+              fi
+              if grep -qiE '429|rate limit|compute units|max retries' <<< "$detail"; then sleep $((attempt * 2)); else break; fi
+            done
+            detail=$(echo "$detail" | tr '\n' ' ' | sed 's/,/;/g' | cut -c1-400)
+            echo "$adapter,$ilk,${live:-?},${regjoin:-?},$simulation,$detail" >> evidence-sky-2022-registry-injection/state.csv
+            if [[ "$simulation" == SUCCESS ]]; then
+              echo "$adapter $ilk live=${live:-?}" >> evidence-sky-2022-registry-injection/addable-before-cast.txt
+            fi
+            sleep 0.15
+          done < evidence-sky-2022-registry-injection/addresses.txt
+
+          {
+            echo "addable_absent_before_cast=$(wc -l < evidence-sky-2022-registry-injection/addable-before-cast.txt)"
+            cat evidence-sky-2022-registry-injection/addable-before-cast.txt
+          } | tee evidence-sky-2022-registry-injection/summary.txt
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-2022-registry-list-injection-scan
+          path: evidence-sky-2022-registry-injection/
+          if-no-files-found: error
+          retention-days: 30
