@@ -1,0 +1,74 @@
+name: Vault absorb gas DoS probe
+
+on:
+  push:
+    branches: [audit/absorb-gas-dos]
+    paths:
+      - 'test/foundry/security/absorbGasDos.t.sol'
+      - '.github/workflows/absorb-gas-dos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/absorb-gas-dos
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install Solidity dependencies
+        run: npm ci
+
+      - name: Read current Plasma block gas limit
+        shell: bash
+        run: |
+          set -euo pipefail
+          GAS_LIMIT=""
+          for RPC in https://rpc.plasma.to https://plasma-rpc.publicnode.com; do
+            BODY=$(curl -fsS --max-time 20 \
+              -H 'content-type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",false]}' \
+              "$RPC" || true)
+            GAS_LIMIT=$(python -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(int(d.get("result",{}).get("gasLimit","0x0"),16))' <<< "$BODY" 2>/dev/null || true)
+            if [[ "$GAS_LIMIT" =~ ^[0-9]+$ ]] && [ "$GAS_LIMIT" -gt 0 ]; then
+              echo "Plasma RPC: $RPC"
+              break
+            fi
+          done
+          if ! [[ "$GAS_LIMIT" =~ ^[0-9]+$ ]] || [ "$GAS_LIMIT" -le 0 ]; then
+            GAS_LIMIT=36000000
+            echo 'RPC lookup failed; using the recently observed Plasma block gas limit fallback.'
+          fi
+          echo "PLASMA_BLOCK_GAS_LIMIT=$GAS_LIMIT" | tee -a "$GITHUB_ENV"
+          echo "Observed Plasma block gas limit: $GAS_LIMIT"
+
+      - name: Run targeted absorb gas probe
+        shell: bash
+        run: |
+          mkdir -p automation
+          set -o pipefail
+          forge test \
+            --match-path test/foundry/security/absorbGasDos.t.sol \
+            --match-contract AbsorbGasDosTest \
+            --match-test test_absorbGasScalesWithUniqueTicks \
+            -vvv 2>&1 | tee automation/absorb-gas-dos.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: absorb-gas-dos-results
+          path: automation/absorb-gas-dos.log
