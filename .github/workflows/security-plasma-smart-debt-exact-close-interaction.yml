@@ -1,0 +1,66 @@
+name: Security Plasma Smart Debt exact close interaction
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-debt-exact-12386164
+    paths:
+      - 'test/security/PlasmaSmartDebtExactCloseInteraction.t.sol'
+      - '.github/workflows/security-plasma-smart-debt-exact-close-interaction.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-three-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: '12386164'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Prepare isolated exact Smart Debt harness
+        shell: bash
+        run: |
+          rm -rf audit/plasma-smart-debt-exact
+          mkdir -p audit/plasma-smart-debt-exact/test audit/plasma-smart-debt-exact/lib evidence-plasma-smart-debt-exact
+          cp test/security/PlasmaSmartDebtExactCloseInteraction.t.sol audit/plasma-smart-debt-exact/test/
+          cp -R lib/forge-std audit/plasma-smart-debt-exact/lib/forge-std
+
+      - name: Run exact three-control fork proof
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/plasma-smart-debt-exact \
+            --via-ir \
+            --match-contract PlasmaSmartDebtExactCloseInteractionTest \
+            -vvvv 2>&1 | tee evidence-plasma-smart-debt-exact/exact-interaction.log
+
+      - name: Extract numerical evidence
+        if: always()
+        shell: bash
+        run: |
+          printf 'PLASMA_FORK_BLOCK=%s\n' "$PLASMA_FORK_BLOCK" | tee evidence-plasma-smart-debt-exact/block.txt
+          grep -E "(ExactSurface|BaselineClose|PerturbOnly|CombinedClose|ExactInteraction)\(|Suite result|Failing tests|Error:|revert" \
+            evidence-plasma-smart-debt-exact/exact-interaction.log \
+            | tee evidence-plasma-smart-debt-exact/summary.log || true
+
+      - name: Upload exact interaction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-smart-debt-exact-close-interaction
+          path: evidence-plasma-smart-debt-exact/
+          if-no-files-found: error
+          retention-days: 30
