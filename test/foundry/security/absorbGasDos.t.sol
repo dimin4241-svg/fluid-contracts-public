@@ -100,7 +100,9 @@ contract AbsorbGasDosTest is VaultsBaseTest {
 
     function _measureAbsorb(uint256 gasCap_) internal returns (GasResult memory result_) {
         uint256 snapshot_ = vm.snapshot();
-        bytes memory payload_ = abi.encodeWithSelector(SIMULATE_LIQUIDATE_SELECTOR, uint256(0), true);
+        // A finite amount still forces the full synchronous absorb, but avoids the separate
+        // max-quote underflow that occurs after all active ticks were absorbed.
+        bytes memory payload_ = abi.encodeWithSelector(SIMULATE_LIQUIDATE_SELECTOR, uint256(10_000), true);
 
         bytes memory returnData_;
         uint256 gasBefore_ = gasleft();
