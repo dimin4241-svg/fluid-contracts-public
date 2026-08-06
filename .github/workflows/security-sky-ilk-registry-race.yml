@@ -1,4 +1,4 @@
-name: Security Sky IlkRegistry removal race
+name: Security Sky IlkRegistry mass re-add
 
 on:
   push:
@@ -46,20 +46,13 @@ jobs:
             echo "Testing $rpc" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
             stable=1
             for attempt in 1 2; do
-              if ! output=$(timeout 30 cast call \
-                0x5a464C28D19848f44199D003BeF5ecc87d090F87 \
-                'count()(uint256)' \
-                --block 23118263 \
-                --rpc-url "$rpc" 2>&1); then
+              if ! output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block 23118263 --rpc-url "$rpc" 2>&1); then
                 stable=0
                 echo "attempt=$attempt failed: $output" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
                 break
               fi
               echo "attempt=$attempt output=$output" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
-              if ! [[ "$output" =~ ^[0-9]+ ]]; then
-                stable=0
-                break
-              fi
+              if ! [[ "$output" =~ ^[0-9]+ ]]; then stable=0; break; fi
             done
             if [[ "$stable" == 1 ]]; then
               echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
@@ -81,14 +74,14 @@ jobs:
             echo -n 'cleanup_spell_eta=' && cast call 0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5 'eta()(uint256)' --block 23118263 --rpc-url "$ETH_RPC_URL"
           } 2>&1 | tee evidence-sky-ilk-registry-race/historical-preconditions.log
 
-      - name: Run real-target scan and differential spell proof
+      - name: Run mass re-add proof against real spell
         shell: bash
         working-directory: sky-poc
         run: |
           set -o pipefail
           forge test \
-            --match-path src/IlkRegistryTargetScan.t.sol \
-            --match-test testFindRealPermissionlessPreRemoveAndCorruptRealSpell \
+            --match-path src/IlkRegistryMassReAdd.t.sol \
+            --match-test testAttackerMassReAddsGovernanceRemovedIlks \
             -vvvv 2>&1 | tee ../evidence-sky-ilk-registry-race/forge-test.log
 
       - name: Extract proof summary
@@ -98,14 +91,14 @@ jobs:
           {
             cat evidence-sky-ilk-registry-race/rpc-selection.log 2>/dev/null || true
             cat evidence-sky-ilk-registry-race/historical-preconditions.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|pre-removable|victim|count|ghost|none of the)' evidence-sky-ilk-registry-race/forge-test.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|re-added ilk|governance removals reversed|adapters still live|cleaned count|post-attack count)' evidence-sky-ilk-registry-race/forge-test.log 2>/dev/null || true
           } | tee evidence-sky-ilk-registry-race/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-ilk-registry-removal-race
+          name: sky-ilk-registry-mass-readd
           path: evidence-sky-ilk-registry-race/
           if-no-files-found: error
           retention-days: 30
