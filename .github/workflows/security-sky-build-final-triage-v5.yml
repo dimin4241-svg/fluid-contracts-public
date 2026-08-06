@@ -1,0 +1,308 @@
+name: Security Sky final triage red-team package v5
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-build-final-triage-v5.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FOCUSED_RUN: '31093422870'
+      SAFE_RUN: '31093768541'
+    steps:
+      - name: Require successful validation runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for run in "$FOCUSED_RUN" "$SAFE_RUN"; do
+            status=$(gh run view "$run" --repo dimin4241-svg/fluid-contracts-public --json status --jq .status)
+            conclusion=$(gh run view "$run" --repo dimin4241-svg/fluid-contracts-public --json conclusion --jq .conclusion)
+            echo "run=$run status=$status conclusion=$conclusion"
+            [[ "$status" == "completed" && "$conclusion" == "success" ]]
+          done
+
+      - name: Checkout PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: poc
+          submodules: false
+
+      - name: Checkout exact IlkRegistry source
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/ilk-registry
+          ref: 1d65fb6e17c28e9e94ac88f0d8ccad04d8945f3c
+          path: upstream/ilk-registry
+
+      - name: Checkout exact spell archive
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/spells-mainnet
+          ref: 6e90e066cfc2102bc864e23a29f4c744e0a4a1bc
+          path: upstream/spells-mainnet
+
+      - name: Checkout exact governance proposal
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/executive-votes
+          ref: 5f326b5158efd320d2ca1fe6c6cbaafa7664a70f
+          path: upstream/executive-votes
+
+      - name: Checkout exact DssExec source
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/dss-exec-lib
+          ref: 555d1c158f2ab695e04d6de6e603b118d32214c4
+          path: upstream/dss-exec-lib
+
+      - name: Checkout exact OmegaPoker source
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/megapoker
+          ref: 83bd1a6dceba1bcc28eaa54ccd8b8afdbde6fcb5
+          path: upstream/megapoker
+
+      - name: Assemble final package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-triage-red-team-final-v5"
+          mkdir -p "$ROOT"/{report,source,references,evidence/focused,evidence/safe-mitigation}
+
+          cp poc/evidence/IMMUNEFI_REPORT.md "$ROOT/report/CANDIDATE_IMMUNEFI_REPORT.md"
+          cp poc/evidence/TRIAGE_RED_TEAM.md "$ROOT/report/"
+          cp poc/evidence/TRIAGE_OBJECTION_MATRIX.md "$ROOT/report/"
+          cp poc/evidence/VALIDATION_SUMMARY.md "$ROOT/report/"
+          cp poc/evidence/SUBMISSION_FIELDS.md "$ROOT/report/"
+          cp poc/evidence/FINAL_ASSESSMENT.md "$ROOT/report/"
+          cp poc/evidence/PROGRAM_RULES.md "$ROOT/report/"
+          cp poc/evidence/SAFE_SPELL_MITIGATION.md "$ROOT/report/"
+
+          cp poc/src/IlkRegistryAtomicGovernanceReversal.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryGovernanceRemovalVeto.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryCurrentMassReAdd.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryPersistence.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryDirectSpotterSingleControl.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistrySafeSpellMitigation.t.sol "$ROOT/source/"
+          cp poc/foundry.toml "$ROOT/source/"
+          cp poc/.gitmodules "$ROOT/source/"
+
+          cp upstream/ilk-registry/src/IlkRegistry.sol "$ROOT/references/IlkRegistry.sol"
+          cp upstream/ilk-registry/src/IlkRegistry.t.sol "$ROOT/references/IlkRegistry.official-tests.sol"
+          cp upstream/ilk-registry/README.md "$ROOT/references/IlkRegistry.README.md"
+          cp upstream/spells-mainnet/archive/2025-08-07-DssSpell/DssSpell.sol "$ROOT/references/2025-08-07-DssSpell.sol"
+          cp upstream/spells-mainnet/archive/2025-08-07-DssSpell/DssSpell.t.sol "$ROOT/references/2025-08-07-DssSpell.official-test.sol"
+          cp 'upstream/executive-votes/2025/executive-vote-2025-08-07-deactivate-morpho-ddm-chainlog-management.md' "$ROOT/references/2025-08-07-governance-proposal.md"
+          cp upstream/dss-exec-lib/src/DssExec.sol "$ROOT/references/DssExec.sol"
+          cp upstream/megapoker/src/OmegaPoker.sol "$ROOT/references/OmegaPoker.sol"
+
+          gh run download "$FOCUSED_RUN" \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --name sky-governance-veto-validation-v4 \
+            --dir "$ROOT/evidence/focused"
+
+          gh run download "$SAFE_RUN" \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --name sky-safe-spell-mitigation-control \
+            --dir "$ROOT/evidence/safe-mitigation"
+
+          cat > "$ROOT/README_FIRST.md" <<'EOF'
+          # Read this first
+
+          This package contains both:
+
+          1. a reproducible IlkRegistry governance-removal-veto behavior; and
+          2. the adversarial controls showing why the current Sky bounty rules are likely to reject it.
+
+          ## Final recommendation
+
+          Do not submit the earlier MCD_VAT/Chainlog-framed v3 report.
+
+          The narrow candidate report is technically reproducible but is not recommended as a strong payout submission because:
+
+          - IlkRegistry is intentionally public;
+          - official tests support `removeAuth -> add` refresh;
+          - Sky rules assign governance/permissionless composition to the spell layer; and
+          - a safe existing Spotter action prevents re-add without breaking Join exit.
+
+          Start with:
+
+          - `report/FINAL_ASSESSMENT.md`
+          - `report/TRIAGE_RED_TEAM.md`
+          - `report/SAFE_SPELL_MITIGATION.md`
+          EOF
+
+          cat > "$ROOT/REPRODUCE.md" <<'EOF'
+          # Reproduction
+
+          ```bash
+          git clone https://github.com/dimin4241-svg/dss-emergency-spells.git
+          cd dss-emergency-spells
+          git checkout audit/ilk-registry-readd-proof
+          git submodule update --init --recursive
+          export ETH_RPC_URL='<ARCHIVE_CAPABLE_ETHEREUM_RPC>'
+
+          forge build
+
+          forge test --threads 1 --match-path src/IlkRegistryAtomicGovernanceReversal.t.sol \
+            --match-test testOneUnprivilegedTransactionCastsSpellAndReversesCleanup -vvvv
+
+          forge test --threads 1 --match-path src/IlkRegistryGovernanceRemovalVeto.t.sol \
+            --match-test testPublicCallerCanVetoRepeatedGovernanceRemovalCycles -vvvv
+
+          forge test --threads 1 --match-path src/IlkRegistryCurrentMassReAdd.t.sol -vvvv
+          forge test --threads 1 --match-path src/IlkRegistryPersistence.t.sol -vvvv
+
+          forge test --threads 1 --match-path src/IlkRegistryDirectSpotterSingleControl.t.sol \
+            --match-test testDirectPublicOracleAndSpotterPathMatchesRegistryOmegaResult -vvvv
+
+          forge test --threads 1 --match-path src/IlkRegistrySafeSpellMitigation.t.sol \
+            --match-test testGovernanceCanBlockReAddByClearingPipWithoutBreakingExit -vvvv
+          ```
+          EOF
+
+          cat > "$ROOT/MANIFEST.md" <<EOF
+          # Manifest
+
+          - Focused validation run: \`$FOCUSED_RUN\`
+          - Safe mitigation run: \`$SAFE_RUN\`
+          - Package source commit: \`$(git -C poc rev-parse HEAD)\`
+          - Production IlkRegistry: \`0x5a464C28D19848f44199D003BeF5ecc87d090F87\`
+          - Real cleanup spell: \`0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5\`
+
+          This package supersedes all earlier v2/v3/v4 packages.
+          EOF
+
+          cat > "$ROOT/verify.py" <<'PY'
+          #!/usr/bin/env python3
+          from __future__ import annotations
+
+          import hashlib
+          import pathlib
+          import sys
+
+          root = pathlib.Path(__file__).resolve().parent
+          errors: list[str] = []
+
+          for raw in (root / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              if not raw.strip():
+                  continue
+              expected, rel = raw.split("  ", 1)
+              path = root / rel
+              if not path.is_file():
+                  errors.append(f"missing: {rel}")
+                  continue
+              if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                  errors.append(f"hash mismatch: {rel}")
+
+          required = {
+              "evidence/focused/summary.log": [
+                  "Compiler run successful!",
+                  "CASE_PASS atomic-real-spell-reversal",
+                  "CASE_PASS current-exact-addability",
+                  "CASE_PASS repeated-governance-veto",
+                  "CASE_PASS persistence-and-mitigation",
+                  "CASE_PASS direct-oracle-causality-control",
+                  "CASE_PASS residual-debt-negative-control",
+              ],
+              "evidence/safe-mitigation/key-results.log": [
+                  "public re-add blocked true",
+                  "zero-amount exit still succeeds true",
+                  "AAVE Join Vat ward after mitigation 1",
+                  "AAVE Join live after mitigation 1",
+              ],
+              "report/FINAL_ASSESSMENT.md": [
+                  "not recommended for submission",
+                  "Accepted as the listed Critical governance impact: **1–5%**",
+                  "Any bounty: **2–8%**",
+              ],
+              "report/TRIAGE_RED_TEAM.md": [
+                  "safe one-line spell mitigation",
+                  "incomplete spell composition",
+              ],
+              "report/SAFE_SPELL_MITIGATION.md": [
+                  "IlkRegistry/pip-invalid",
+                  "preserving the collateral exit path",
+              ],
+          }
+
+          for rel, needles in required.items():
+              path = root / rel
+              if not path.is_file():
+                  errors.append(f"required file missing: {rel}")
+                  continue
+              text = path.read_text(encoding="utf-8", errors="replace")
+              for needle in needles:
+                  if needle not in text:
+                      errors.append(f"missing marker in {rel}: {needle}")
+
+          candidate = (root / "report/CANDIDATE_IMMUNEFI_REPORT.md").read_text(encoding="utf-8")
+          banned = [
+              "reactivates retired paths in MCD_VAT",
+              "Primary selection: **MCD_VAT**",
+              "defeats coordinated governance oracle retirement",
+          ]
+          for phrase in banned:
+              if phrase in candidate:
+                  errors.append(f"superseded candidate framing present: {phrase}")
+
+          banned_names = {
+              "IlkRegistryAtomicRace.t.sol",
+              "IlkRegistryTargetScan.t.sol",
+              "IlkRegistryAtomicOracleRetirementProof.t.sol",
+              "IlkRegistryCurrentAtomicVatPropagation.t.sol",
+          }
+          names = {p.name for p in root.rglob("*") if p.is_file()}
+          for name in sorted(banned_names & names):
+              errors.append(f"excluded artifact present: {name}")
+
+          if errors:
+              print("VALIDATION FAILED")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+
+          print("VALIDATION PASSED")
+          print("Positive proofs, rejection controls, safe mitigation, and superseded-framing exclusions passed.")
+          PY
+          chmod +x "$ROOT/verify.py"
+
+          (
+            cd "$ROOT"
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            python3 verify.py
+          )
+
+      - name: Create deterministic final package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-triage-red-team-final-v5"
+          find "$ROOT" -exec touch -h -t 202608060000.00 {} +
+          cd "$GITHUB_WORKSPACE"
+          zip -X -q -r sky-ilk-registry-triage-red-team-final-v5.zip \
+            sky-ilk-registry-triage-red-team-final-v5
+          sha256sum sky-ilk-registry-triage-red-team-final-v5.zip | tee PACKAGE_SHA256.txt
+
+      - name: Upload final v5 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-ilk-registry-triage-red-team-final-v5
+          path: |
+            sky-ilk-registry-triage-red-team-final-v5.zip
+            PACKAGE_SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
