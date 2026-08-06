@@ -56,6 +56,8 @@ jobs:
         run: |
           set -o pipefail
           forge test \
+            --via-ir \
+            --optimize \
             --match-path src/IlkRegistryOmegaPokerImpact.t.sol \
             --match-test testMassReAddChangesDeployedOmegaPokerExecution \
             -vvvv 2>&1 | tee ../evidence-sky-omega-poker/forge-test.log
@@ -73,7 +75,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-omega-poker-impact
+          name: sky-omega-poker-impact-v2
           path: evidence-sky-omega-poker/
           if-no-files-found: error
           retention-days: 30
