@@ -1,0 +1,55 @@
+name: Plasma T4 one-sided V2 Ubuntu22
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-liquidation-20260806
+    paths:
+      - '.github/workflows/plasma-t4-one-sided-v2-ubuntu22.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  feasible:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare
+        shell: bash
+        run: |
+          rm -rf audit/one-sided-u22
+          mkdir -p audit/one-sided-u22/test audit/one-sided-u22/lib evidence-u22
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/one-sided-u22/test/
+          cp test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol audit/one-sided-u22/test/
+          cp test/security/PlasmaVaultT4OneSidedBorrowLiquidation.t.sol audit/one-sided-u22/test/
+          cp test/security/PlasmaVaultT4OneSidedBorrowLiquidationV2.t.sol audit/one-sided-u22/test/
+          cp -R lib/forge-std audit/one-sided-u22/lib/forge-std
+      - name: Run
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/one-sided-u22 --via-ir --match-contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test --match-test test_feasibleOneSidedBorrowLiquidation -vvvv 2>&1 | tee evidence-u22/test.log
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(FeasibleCase|FeasibleDeposit|FeasibleBorrow|FeasibleLiquidation)\(|Suite result|Failing tests|Error:|revert' evidence-u22/test.log | tee evidence-u22/summary.log || true
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-one-sided-v2-ubuntu22
+          path: evidence-u22/
+          if-no-files-found: error
+          retention-days: 30
