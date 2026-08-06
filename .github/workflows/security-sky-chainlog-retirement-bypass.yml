@@ -1,0 +1,80 @@
+name: Security Sky Chainlog retirement bypass
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-chainlog-retirement-bypass.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chainlog-bypass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Run coordinated retirement bypass proof with RPC failover
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence-sky-chainlog-bypass
+          endpoints=(
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://mainnet.gateway.tenderly.co'
+            'https://eth-mainnet.public.blastapi.io'
+            'https://rpc.payload.de'
+          )
+
+          forge build 2>&1 | tee ../evidence-sky-chainlog-bypass/forge-build.log
+
+          passed=0
+          for rpc in "${endpoints[@]}"; do
+            log=../evidence-sky-chainlog-bypass/forge-test.log
+            echo "RUN rpc=$rpc" | tee -a ../evidence-sky-chainlog-bypass/attempts.log
+            set +e
+            ETH_RPC_URL="$rpc" forge test \
+              --match-path src/IlkRegistryChainlogRetirementBypass.t.sol \
+              --match-test testAtomicReAddBypassesCoordinatedChainlogOracleRetirement \
+              -vvvv > "$log" 2>&1
+            rc=$?
+            set -e
+            cat "$log"
+            if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
+              echo "CASE_PASS chainlog-retirement-bypass rpc=$rpc" | tee ../evidence-sky-chainlog-bypass/summary.log
+              passed=1
+              break
+            fi
+            echo "CASE_RETRY rpc=$rpc rc=$rc" | tee -a ../evidence-sky-chainlog-bypass/summary.log
+          done
+          [[ $passed -eq 1 ]]
+
+          grep -E '(retired ilk recached|Vat.spot changed|Chainlog oracle keys|restored Registry|cached in clean|recached after attack|spot values changed|final attacked Registry|PASS|Suite result)' \
+            ../evidence-sky-chainlog-bypass/forge-test.log \
+            | tee ../evidence-sky-chainlog-bypass/key-results.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-chainlog-oracle-retirement-bypass
+          path: evidence-sky-chainlog-bypass/
+          if-no-files-found: error
+          retention-days: 30
