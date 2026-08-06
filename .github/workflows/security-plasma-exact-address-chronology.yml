@@ -1,0 +1,80 @@
+name: Security Plasma exact address chronology
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-exact-debt-controls-20260806
+    paths:
+      - '.github/workflows/security-plasma-exact-address-chronology.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chronology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      VAULT: 0x6E0Cdb5c21B3c8E340E9C9210057035bAfA86ffF
+      DEX: 0xbd5dD095d9a6565C8222bb36B5814953F1C46f71
+      CLAIMED_BLOCK: 12386164
+      RECORDED_LIVE_BLOCK: 29082579
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Locate first code blocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-plasma-exact-address-chronology
+          latest=$(cast block-number --rpc-url "$PLASMA_RPC_URL")
+
+          has_code() {
+            local addr="$1" block="$2" code
+            code=$(cast code "$addr" --rpc-url "$PLASMA_RPC_URL" --block "$block")
+            [[ "$code" != "0x" ]]
+          }
+
+          first_code_block() {
+            local addr="$1" low=0 high="$latest" mid
+            if ! has_code "$addr" "$high"; then
+              echo none
+              return
+            fi
+            while (( low < high )); do
+              mid=$(( (low + high) / 2 ))
+              if has_code "$addr" "$mid"; then
+                high="$mid"
+              else
+                low=$(( mid + 1 ))
+              fi
+            done
+            echo "$low"
+          }
+
+          vault_first=$(first_code_block "$VAULT")
+          dex_first=$(first_code_block "$DEX")
+          {
+            echo "latest=$latest"
+            echo "claimed_block=$CLAIMED_BLOCK"
+            echo "recorded_live_block=$RECORDED_LIVE_BLOCK"
+            echo "vault=$VAULT"
+            echo "vault_first_code_block=$vault_first"
+            echo "vault_code_at_claimed=$(cast code "$VAULT" --rpc-url "$PLASMA_RPC_URL" --block "$CLAIMED_BLOCK")"
+            echo "vault_code_at_recorded_live_prefix=$(cast code "$VAULT" --rpc-url "$PLASMA_RPC_URL" --block "$RECORDED_LIVE_BLOCK" | cut -c1-66)"
+            echo "dex=$DEX"
+            echo "dex_first_code_block=$dex_first"
+            echo "dex_code_at_claimed=$(cast code "$DEX" --rpc-url "$PLASMA_RPC_URL" --block "$CLAIMED_BLOCK")"
+            echo "dex_code_at_recorded_live_prefix=$(cast code "$DEX" --rpc-url "$PLASMA_RPC_URL" --block "$RECORDED_LIVE_BLOCK" | cut -c1-66)"
+          } | tee evidence-plasma-exact-address-chronology/chronology.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-exact-address-chronology
+          path: evidence-plasma-exact-address-chronology/
+          if-no-files-found: error
+          retention-days: 30
