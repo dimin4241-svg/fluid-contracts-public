@@ -1,0 +1,68 @@
+name: Security Plasma SmartLending inventory
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - 'test/security/PlasmaSmartLendingInventory.t.sol'
+      - '.github/workflows/security-plasma-smart-lending-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - name: Checkout inventory branch
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated inventory harness
+        shell: bash
+        run: |
+          mkdir -p audit/fork-poc/test evidence-smart-lending-inventory
+          cp test/security/PlasmaSmartLendingInventory.t.sol audit/fork-poc/test/
+
+      - name: Enumerate deployed SmartLending wrappers
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/fork-poc \
+            --via-ir \
+            --match-path test/PlasmaSmartLendingInventory.t.sol \
+            -vvvv 2>&1 | tee evidence-smart-lending-inventory/inventory.log
+
+      - name: Extract evidence summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(InventoryHeader|WrapperInventory|TargetMatch|TargetSummary)\(|Suite result|Failing tests|Error:" \
+            evidence-smart-lending-inventory/inventory.log \
+            | tee evidence-smart-lending-inventory/inventory-summary.log || true
+
+      - name: Upload inventory evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-smart-lending-inventory
+          path: evidence-smart-lending-inventory/
+          if-no-files-found: error
+          retention-days: 30
