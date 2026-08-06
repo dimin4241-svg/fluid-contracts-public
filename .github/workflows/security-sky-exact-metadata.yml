@@ -1,4 +1,4 @@
-name: Security Sky exact metadata restoration
+name: Security Sky operational metadata restoration v2
 
 on:
   push:
@@ -50,7 +50,7 @@ jobs:
           done
           exit 1
 
-      - name: Run exact semantic metadata restoration proof
+      - name: Run operational metadata restoration proof
         shell: bash
         working-directory: sky-poc
         run: |
@@ -66,14 +66,14 @@ jobs:
         run: |
           {
             cat evidence-sky-exact-metadata/rpc.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|governance removals reversed|adapters still live|exact semantic metadata restores|cleaned count|post-attack count)' evidence-sky-exact-metadata/forge-test.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|governance removals reversed|adapters still live|exact operational metadata restores|display metadata drifts|cleaned count|post-attack count)' evidence-sky-exact-metadata/forge-test.log 2>/dev/null || true
           } | tee evidence-sky-exact-metadata/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-exact-metadata-restoration
+          name: sky-operational-metadata-restoration-v2
           path: evidence-sky-exact-metadata/
           if-no-files-found: error
           retention-days: 30
