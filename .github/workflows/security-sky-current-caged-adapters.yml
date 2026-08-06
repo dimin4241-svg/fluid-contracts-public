@@ -1,0 +1,131 @@
+name: Security Sky current caged adapter scan
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-current-caged-adapters.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  current-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout complete Sky spell archive
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/spells-mainnet
+          ref: master
+          path: spells-mainnet
+          fetch-depth: 1
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Select stable Ethereum RPC
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-current-caged-adapters
+          endpoints=(
+            'https://eth.drpc.org'
+            'https://rpc.payload.de'
+            'https://eth-mainnet.public.blastapi.io'
+            'https://mainnet.gateway.tenderly.co'
+            'https://ethereum-rpc.publicnode.com'
+          )
+          for rpc in "${endpoints[@]}"; do
+            if output=$(timeout 25 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
+              echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
+              echo "selected=$rpc count=$output" | tee evidence-current-caged-adapters/rpc.log
+              exit 0
+            fi
+          done
+          exit 1
+
+      - name: Extract historical Join addresses
+        shell: bash
+        run: |
+          python3 - <<'PY' > evidence-current-caged-adapters/addresses.txt
+          from pathlib import Path
+          import re
+          addrs = set()
+          patterns = [
+              re.compile(r'address(?:\s+(?:public|internal|private))?\s+constant\s+[A-Z0-9_]*JOIN[A-Z0-9_]*\s*=\s*(0x[0-9a-fA-F]{40})'),
+              re.compile(r'[A-Z0-9_]*JOIN[A-Z0-9_]*\s*=\s*(0x[0-9a-fA-F]{40})'),
+          ]
+          for p in Path('spells-mainnet').rglob('*.sol'):
+              text = p.read_text(errors='ignore')
+              for pattern in patterns:
+                  addrs.update(a.lower() for a in pattern.findall(text))
+          for addr in sorted(a for a in addrs if a != '0x0000000000000000000000000000000000000000'):
+              print(addr)
+          PY
+          echo "historical_addresses=$(wc -l < evidence-current-caged-adapters/addresses.txt)" | tee -a evidence-current-caged-adapters/rpc.log
+
+      - name: Query production state
+        shell: bash
+        run: |
+          set -euo pipefail
+          REG=0x5a464C28D19848f44199D003BeF5ecc87d090F87
+          VAT=0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
+          DOG=0x135954d155898D42C90D2a57824C690e0c7BEf1B
+          CAT=0xa5679c46e7dE51a2B8f0612a2cA28B53E0c1c13e
+          SPOT=0x65C79fcB50Ca1594B025960e539eD7A9a6D434A3
+          ZERO=0x0000000000000000000000000000000000000000
+
+          echo 'adapter,ilk,live,vat_ward,registry_join,pip,clip,flip,art,line,addable,caged_addable' > evidence-current-caged-adapters/state.csv
+          : > evidence-current-caged-adapters/caged-addable.txt
+          : > evidence-current-caged-adapters/all-addable.txt
+
+          while read -r adapter; do
+            vat=$(timeout 20 cast call "$adapter" 'vat()(address)' --rpc-url "$ETH_RPC_URL" 2>/dev/null || true)
+            [[ "${vat,,}" == "${VAT,,}" ]] || continue
+            ilk=$(timeout 20 cast call "$adapter" 'ilk()(bytes32)' --rpc-url "$ETH_RPC_URL" 2>/dev/null || true)
+            [[ "$ilk" =~ ^0x[0-9a-fA-F]{64}$ ]] || continue
+            live=$(timeout 20 cast call "$adapter" 'live()(uint256)' --rpc-url "$ETH_RPC_URL" 2>/dev/null | awk '{print $1}' || true)
+            ward=$(timeout 20 cast call "$VAT" 'wards(address)(uint256)' "$adapter" --rpc-url "$ETH_RPC_URL" 2>/dev/null | awk '{print $1}' || true)
+            regjoin=$(timeout 20 cast call "$REG" 'join(bytes32)(address)' "$ilk" --rpc-url "$ETH_RPC_URL" 2>/dev/null || true)
+            pip=$(timeout 20 cast call "$SPOT" 'ilks(bytes32)(address,uint256)' "$ilk" --rpc-url "$ETH_RPC_URL" 2>/dev/null | head -n1 || true)
+            clip=$(timeout 20 cast call "$DOG" 'ilks(bytes32)(address,uint256,uint256,uint256)' "$ilk" --rpc-url "$ETH_RPC_URL" 2>/dev/null | head -n1 || true)
+            flip=$(timeout 20 cast call "$CAT" 'ilks(bytes32)(address,uint256,uint256)' "$ilk" --rpc-url "$ETH_RPC_URL" 2>/dev/null | head -n1 || true)
+            read -r art _ _ line _ < <(timeout 20 cast call "$VAT" 'ilks(bytes32)(uint256,uint256,uint256,uint256,uint256)' "$ilk" --rpc-url "$ETH_RPC_URL" 2>/dev/null | awk '{print $1}' | xargs || true)
+
+            addable=0
+            caged=0
+            if [[ "$ward" == 1 && "${regjoin,,}" == "${ZERO,,}" && "${pip,,}" != "${ZERO,,}" && ( "${clip,,}" != "${ZERO,,}" || "${flip,,}" != "${ZERO,,}" ) ]]; then
+              addable=1
+              echo "$adapter $ilk live=$live art=${art:-?} line=${line:-?} pip=$pip clip=$clip flip=$flip" >> evidence-current-caged-adapters/all-addable.txt
+              if [[ "$live" == 0 ]]; then
+                caged=1
+                echo "$adapter $ilk art=${art:-?} line=${line:-?} pip=$pip clip=$clip flip=$flip" >> evidence-current-caged-adapters/caged-addable.txt
+              fi
+            fi
+            echo "$adapter,$ilk,${live:-?},${ward:-?},${regjoin:-?},${pip:-?},${clip:-?},${flip:-?},${art:-?},${line:-?},$addable,$caged" >> evidence-current-caged-adapters/state.csv
+          done < evidence-current-caged-adapters/addresses.txt
+
+          {
+            echo "production_registry_count=$(cast call "$REG" 'count()(uint256)' --rpc-url "$ETH_RPC_URL")"
+            echo "all_addable_count=$(wc -l < evidence-current-caged-adapters/all-addable.txt)"
+            echo "caged_addable_count=$(wc -l < evidence-current-caged-adapters/caged-addable.txt)"
+            echo '--- all addable ---'
+            cat evidence-current-caged-adapters/all-addable.txt
+            echo '--- caged addable ---'
+            cat evidence-current-caged-adapters/caged-addable.txt
+          } | tee evidence-current-caged-adapters/summary.txt
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-current-caged-adapter-scan
+          path: evidence-current-caged-adapters/
+          if-no-files-found: error
+          retention-days: 30
