@@ -1,0 +1,61 @@
+name: Plasma T4 pure DEX debt close stress
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-exact-debt-controls-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol'
+      - 'test/security/PlasmaVaultT4PureDexDebtCloseStress.t.sol'
+      - '.github/workflows/plasma-t4-pure-dex-close-stress.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated stress test
+        shell: bash
+        run: |
+          rm -rf audit/t4-pure-dex-stress
+          mkdir -p audit/t4-pure-dex-stress/test audit/t4-pure-dex-stress/lib evidence-stress
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/t4-pure-dex-stress/test/
+          cp test/security/PlasmaVaultT4PureDexDebtCloseStress.t.sol audit/t4-pure-dex-stress/test/
+          cp -R lib/forge-std audit/t4-pure-dex-stress/lib/forge-std
+      - name: Run large-perturb stress
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/t4-pure-dex-stress --via-ir \
+            --match-contract PlasmaVaultT4PureDexDebtCloseStressTest \
+            --match-test test_largePerturbAggregateRecovery -vvvv 2>&1 \
+            | tee evidence-stress/stress.log
+      - name: Extract stress evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(StressCoverage|StressPosition|StressAggregate|StressProportionality)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-stress/stress.log | tee evidence-stress/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-stress/block.txt
+          git rev-parse HEAD > evidence-stress/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-pure-dex-close-stress
+          path: evidence-stress/
+          if-no-files-found: error
+          retention-days: 30
