@@ -1,0 +1,69 @@
+name: Security Plasma Vault T4 oracle chunked
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-oracle-drift-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4OracleChunked.t.sol'
+      - '.github/workflows/security-plasma-vault-t4-oracle-chunked.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-chunked:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated chunked harness
+        shell: bash
+        run: |
+          rm -rf audit/t4-oracle-chunked-poc
+          mkdir -p audit/t4-oracle-chunked-poc/test audit/t4-oracle-chunked-poc/lib evidence-plasma-vault-t4-oracle-chunked
+          cp test/security/PlasmaVaultT4OracleChunked.t.sol audit/t4-oracle-chunked-poc/test/
+          cp -R lib/forge-std audit/t4-oracle-chunked-poc/lib/forge-std
+
+      - name: Measure chunked oracle accumulation
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/t4-oracle-chunked-poc \
+            --via-ir \
+            --match-path test/PlasmaVaultT4OracleChunked.t.sol \
+            -vvvv 2>&1 | tee evidence-plasma-vault-t4-oracle-chunked/chunked.log
+
+      - name: Extract chunked evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(ChunkMarket|ChunkStep|ChunkFinal)\(|Suite result|Failing tests|Error:|Compiler run failed" \
+            evidence-plasma-vault-t4-oracle-chunked/chunked.log \
+            | tee evidence-plasma-vault-t4-oracle-chunked/summary.log || true
+
+      - name: Upload chunked evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-oracle-chunked
+          path: evidence-plasma-vault-t4-oracle-chunked/
+          if-no-files-found: error
+          retention-days: 30
