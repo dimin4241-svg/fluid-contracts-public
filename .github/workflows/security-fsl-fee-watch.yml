@@ -1,10 +1,17 @@
 name: Security fSL feeOrReward watch
 
 on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - 'scripts/security/check_fsl_fee_or_reward.py'
+      - '.github/workflows/security-fsl-fee-watch.yml'
   pull_request:
     paths:
       - 'scripts/security/check_fsl_fee_or_reward.py'
       - '.github/workflows/security-fsl-fee-watch.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,8 +30,14 @@ jobs:
         shell: bash
         run: |
           set +e
-          python scripts/security/check_fsl_fee_or_reward.py > /tmp/fsl-result.json
+          python scripts/security/check_fsl_fee_or_reward.py
           code=$?
-          cat /tmp/fsl-result.json
           echo "checker_exit_code=$code"
           exit 0
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsl-fee-or-reward-results
+          path: fsl_fee_or_reward_results.json
+          if-no-files-found: error
