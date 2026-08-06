@@ -1,0 +1,41 @@
+name: ETH-osETH withdraw oracle callback probe
+
+on:
+  push:
+    branches: [audit/absorb-gas-dos]
+    paths:
+      - 'test/foundry/security/nativeToken0WithdrawOracleProbe.t.sol'
+      - '.github/workflows/native-token0-withdraw-oracle-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/absorb-gas-dos
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Run live fork probe
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p automation
+          forge test --match-path test/foundry/security/nativeToken0WithdrawOracleProbe.t.sol -vvv 2>&1 | tee automation/native-token0-withdraw-oracle-probe.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-token0-withdraw-oracle-probe
+          path: automation/native-token0-withdraw-oracle-probe.log
