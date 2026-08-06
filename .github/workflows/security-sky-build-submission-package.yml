@@ -1,0 +1,269 @@
+name: Security Sky build submission package
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-build-submission-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: poc
+          submodules: false
+
+      - name: Checkout exact upstream references
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/ilk-registry
+          ref: 1d65fb6e17c28e9e94ac88f0d8ccad04d8945f3c
+          path: upstream/ilk-registry
+
+      - name: Checkout exact spell archive
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/spells-mainnet
+          ref: 6e90e066cfc2102bc864e23a29f4c744e0a4a1bc
+          path: upstream/spells-mainnet
+
+      - name: Checkout exact OmegaPoker source
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/megapoker
+          ref: 83bd1a6dceba1bcc28eaa54ccd8b8afdbde6fcb5
+          path: upstream/megapoker
+
+      - name: Checkout exact governance proposal archive
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/executive-votes
+          ref: 5f326b5158efd320d2ca1fe6c6cbaafa7664a70f
+          path: upstream/executive-votes
+
+      - name: Assemble package tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-terminal-offboarding-validation-v2"
+          mkdir -p "$ROOT"/{report,source,references,evidence/canonical,evidence/omega-exact,evidence/architectural-negative-control}
+
+          cp poc/evidence/IMMUNEFI_REPORT.md "$ROOT/report/"
+          cp poc/evidence/TRIAGE_OBJECTION_MATRIX.md "$ROOT/report/"
+          cp poc/evidence/VALIDATION_SUMMARY.md "$ROOT/report/"
+
+          cp poc/src/IlkRegistryAtomicGovernanceReversal.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryMassReAdd.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryCurrentMassReAdd.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryOmegaPokerImpact.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryPersistence.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryKeeperGas.t.sol "$ROOT/source/"
+          cp poc/foundry.toml "$ROOT/source/"
+          cp poc/.gitmodules "$ROOT/source/"
+
+          cp upstream/ilk-registry/src/IlkRegistry.sol "$ROOT/references/IlkRegistry.sol"
+          cp upstream/ilk-registry/src/IlkRegistry.t.sol "$ROOT/references/IlkRegistry.official-tests.sol"
+          cp upstream/ilk-registry/README.md "$ROOT/references/IlkRegistry.README.md"
+          cp upstream/spells-mainnet/archive/2025-08-07-DssSpell/DssSpell.sol "$ROOT/references/2025-08-07-DssSpell.sol"
+          cp upstream/spells-mainnet/archive/2025-08-07-DssSpell/DssSpell.t.sol "$ROOT/references/2025-08-07-DssSpell.official-test.sol"
+          cp upstream/megapoker/src/OmegaPoker.sol "$ROOT/references/OmegaPoker.sol"
+          cp 'upstream/executive-votes/2025/executive-vote-2025-08-07-deactivate-morpho-ddm-chainlog-management.md' "$ROOT/references/2025-08-07-governance-proposal.md"
+
+          gh run download 31084566815 \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --name sky-canonical-ilk-registry-validation \
+            --dir "$ROOT/evidence/canonical"
+
+          gh run download 31084770021 \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --name sky-omega-poker-exact-downstream-deltas \
+            --dir "$ROOT/evidence/omega-exact"
+
+          gh run download 31083835530 \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --name sky-2022-registry-list-injection-scan \
+            --dir "$ROOT/evidence/architectural-negative-control"
+
+          cat > "$ROOT/REPRODUCE.md" <<'EOF'
+          # Reproduction
+
+          All state-changing tests must be run on a local Ethereum mainnet fork.
+
+          ```bash
+          git clone https://github.com/dimin4241-svg/dss-emergency-spells.git
+          cd dss-emergency-spells
+          git checkout audit/ilk-registry-readd-proof
+          git submodule update --init --recursive
+          export ETH_RPC_URL='<ARCHIVE_CAPABLE_ETHEREUM_RPC>'
+
+          forge build
+
+          forge test --threads 1 \
+            --match-path src/IlkRegistryAtomicGovernanceReversal.t.sol \
+            --match-test testOneUnprivilegedTransactionCastsSpellAndReversesCleanup -vvvv
+
+          forge test --threads 1 \
+            --match-path src/IlkRegistryCurrentMassReAdd.t.sol -vvvv
+
+          forge test --threads 1 \
+            --match-path src/IlkRegistryOmegaPokerImpact.t.sol \
+            --match-test testMassReAddChangesDeployedOmegaPokerExecution -vvvv
+
+          forge test --threads 1 \
+            --match-path src/IlkRegistryPersistence.t.sol -vvvv
+          ```
+
+          Pinned fork baselines:
+
+          - block `23,118,263`: Registry count `72`;
+          - block `25,694,337`: Registry count `35`.
+
+          Public RPC endpoints may return HTTP 429 during fork tests. The included canonical workflow runs tests sequentially with RPC failover. Use a paid/archive RPC for the most reliable local reproduction.
+          EOF
+
+          cat > "$ROOT/MANIFEST.md" <<'EOF'
+          # Manifest
+
+          ## Vulnerable production deployment
+
+          - IlkRegistry: `0x5a464C28D19848f44199D003BeF5ecc87d090F87`
+          - OmegaPoker: `0xDd538C362dF996727054AC8Fb67ef5394eC9b8b9`
+          - 2025 cleanup spell: `0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5`
+
+          ## Pinned source revisions
+
+          - `sky-ecosystem/ilk-registry`: `1d65fb6e17c28e9e94ac88f0d8ccad04d8945f3c`
+          - `sky-ecosystem/spells-mainnet`: `6e90e066cfc2102bc864e23a29f4c744e0a4a1bc`
+          - `sky-ecosystem/megapoker`: `83bd1a6dceba1bcc28eaa54ccd8b8afdbde6fcb5`
+          - `sky-ecosystem/executive-votes`: `5f326b5158efd320d2ca1fe6c6cbaafa7664a70f`
+
+          ## Machine-validation runs
+
+          - Canonical sequential suite: `31084566815`
+          - Exact OmegaPoker/Vat deltas: `31084770021`
+          - 2022 architectural negative control: `31083835530`
+
+          ## Excluded claims
+
+          The package does not claim theft, insolvency, debt reopening, residual-Art RWA re-addition, keeper payout extraction, block-gas DoS, historical pre-remove race, or alternate-gem Join substitution.
+          EOF
+
+          cat > "$ROOT/verify.py" <<'PY'
+          #!/usr/bin/env python3
+          from __future__ import annotations
+
+          import hashlib
+          import pathlib
+          import sys
+
+          root = pathlib.Path(__file__).resolve().parent
+          sums = root / "SHA256SUMS.txt"
+          errors: list[str] = []
+
+          for raw in sums.read_text(encoding="utf-8").splitlines():
+              if not raw.strip():
+                  continue
+              expected, rel = raw.split("  ", 1)
+              path = root / rel
+              if not path.is_file():
+                  errors.append(f"missing: {rel}")
+                  continue
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected:
+                  errors.append(f"hash mismatch: {rel}")
+
+          banned_names = {
+              "IlkRegistryAtomicRace.t.sol",
+              "IlkRegistryTargetScan.t.sol",
+              "IlkRegistryRemovalRaceFormalProof.md",
+          }
+          present_names = {p.name for p in root.rglob("*") if p.is_file()}
+          for name in sorted(banned_names & present_names):
+              errors.append(f"falsified artifact present: {name}")
+
+          required = {
+              "evidence/canonical/summary.log": [
+                  "Compiler run successful!",
+                  "CASE_PASS atomic-governance-reversal",
+                  "CASE_PASS current-exact-restoration",
+                  "CASE_PASS residual-art-negative-control",
+                  "CASE_PASS omega-poker-downstream",
+                  "CASE_PASS persistence-and-mitigation",
+                  "CASE_PASS keeper-bounded-impact",
+              ],
+              "evidence/omega-exact/summary.log": [
+                  "[PASS] testMassReAddChangesDeployedOmegaPokerExecution()",
+                  "attacked Omega ilk count 38",
+                  "attacked Omega OSM count 32",
+                  "legacy Vat spots changed by poke 15",
+              ],
+              "report/IMMUNEFI_REPORT.md": [
+                  "restored atomically 31",
+                  "No malicious governance proposal",
+                  "The report does **not** claim",
+              ],
+          }
+
+          for rel, needles in required.items():
+              path = root / rel
+              if not path.is_file():
+                  errors.append(f"required file missing: {rel}")
+                  continue
+              text = path.read_text(encoding="utf-8", errors="replace")
+              for needle in needles:
+                  if needle not in text:
+                      errors.append(f"missing evidence marker in {rel}: {needle}")
+
+          if errors:
+              print("VALIDATION FAILED")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+
+          print("VALIDATION PASSED")
+          print("All hashes, required evidence markers, and falsified-artifact exclusions passed.")
+          PY
+          chmod +x "$ROOT/verify.py"
+
+          (
+            cd "$ROOT"
+            find . -type f \
+              ! -name SHA256SUMS.txt \
+              -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            python3 verify.py
+          )
+
+      - name: Create deterministic ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-terminal-offboarding-validation-v2"
+          find "$ROOT" -exec touch -h -t 202608060000.00 {} +
+          cd "$GITHUB_WORKSPACE"
+          zip -X -q -r sky-ilk-registry-terminal-offboarding-validation-v2.zip \
+            sky-ilk-registry-terminal-offboarding-validation-v2
+          sha256sum sky-ilk-registry-terminal-offboarding-validation-v2.zip | tee PACKAGE_SHA256.txt
+
+      - name: Upload submission package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-ilk-registry-terminal-offboarding-validation-v2
+          path: |
+            sky-ilk-registry-terminal-offboarding-validation-v2.zip
+            PACKAGE_SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
