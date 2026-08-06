@@ -1,0 +1,73 @@
+name: Security SparkLend CapAutomator live
+
+on:
+  push:
+    branches: [audit/sky-ilk-registry-race-runner-20260806]
+    paths: ['.github/workflows/security-sparklend-cap-automator-live.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query roles and live configs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          rpc=https://ethereum-rpc.publicnode.com
+          C=0x4C1341636721b8B687647920B2E9481f3AB1F2eE
+          POOL=0xC13e21B648A5Ee794902342038FF3aDAB66BE987
+          ACL=0xdA135Cd78A086025BcdC87B038a1C462032b510C
+          DEFAULT=0x0000000000000000000000000000000000000000000000000000000000000000
+          UPDATE=$(cast keccak UPDATE_ROLE)
+          {
+            echo -n block=; cast block-number --rpc-url "$rpc"
+            echo -n pool=; cast call $C 'pool()(address)' --rpc-url "$rpc"
+            echo -n configurator=; cast call $C 'poolConfigurator()(address)' --rpc-url "$rpc"
+            echo -n riskAdmin=; cast call $ACL 'isRiskAdmin(address)(bool)' $C --rpc-url "$rpc"
+            for role in $DEFAULT $UPDATE; do
+              n=$(cast call $C 'getRoleMemberCount(bytes32)(uint256)' $role --rpc-url "$rpc")
+              echo "role=$role count=$n"
+              for ((i=0;i<n;i++)); do
+                a=$(cast call $C 'getRoleMember(bytes32,uint256)(address)' $role $i --rpc-url "$rpc")
+                echo member=$a
+                code=$(cast code $a --rpc-url "$rpc"); echo codebytes=$(((${#code}-2)/2))
+                cast call $a 'masterCopy()(address)' --rpc-url "$rpc" 2>/dev/null || true
+                cast call $a 'getThreshold()(uint256)' --rpc-url "$rpc" 2>/dev/null || true
+                cast call $a 'owner()(address)' --rpc-url "$rpc" 2>/dev/null || true
+              done
+            done
+            echo '=== reserves/configs ==='
+            reserves=$(cast call $POOL 'getReservesList()(address[])' --rpc-url "$rpc")
+            echo "$reserves"
+            python3 - "$reserves" <<'PY'
+          import sys,re
+          print('\n'.join(re.findall(r'0x[a-fA-F0-9]{40}',sys.argv[1])))
+          PY
+          } | tee evidence/header.txt
+          reserves=$(cast call $POOL 'getReservesList()(address[])' --rpc-url "$rpc" | grep -oE '0x[a-fA-F0-9]{40}')
+          : > evidence/configs.txt
+          for a in $reserves; do
+            {
+              echo asset=$a
+              echo -n supplyConfig=' '; cast call $C 'supplyCapConfigs(address)(uint48,uint48,uint48,uint48,uint48)' $a --rpc-url "$rpc"
+              echo -n borrowConfig=' '; cast call $C 'borrowCapConfigs(address)(uint48,uint48,uint48,uint48,uint48)' $a --rpc-url "$rpc"
+              echo -n reserveData=' '; cast call $POOL 'getReserveData(address)((uint256,uint128,uint128,uint128,uint128,uint128,uint40,uint16,address,address,address,address,uint128,uint128,uint128))' $a --rpc-url "$rpc" 2>/dev/null || true
+              echo -n execSim=' '; cast call $C 'exec(address)(uint256,uint256)' $a --rpc-url "$rpc" 2>&1 || true
+            } >> evidence/configs.txt
+          done
+          cat evidence/configs.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sparklend-cap-automator-live
+          path: evidence/
+          retention-days: 30
