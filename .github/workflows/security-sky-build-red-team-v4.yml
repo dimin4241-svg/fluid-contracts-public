@@ -1,0 +1,296 @@
+name: Security Sky build governance veto red-team v4
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-build-red-team-v4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VALIDATION_RUN: '31093422870'
+    steps:
+      - name: Wait for focused validation success
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            status=$(gh run view "$VALIDATION_RUN" --repo dimin4241-svg/fluid-contracts-public --json status --jq .status)
+            conclusion=$(gh run view "$VALIDATION_RUN" --repo dimin4241-svg/fluid-contracts-public --json conclusion --jq .conclusion)
+            echo "validation status=$status conclusion=$conclusion"
+            if [[ "$status" == "completed" ]]; then
+              [[ "$conclusion" == "success" ]]
+              exit 0
+            fi
+            sleep 15
+          done
+          echo 'Focused validation did not complete successfully' >&2
+          exit 1
+
+      - name: Checkout PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: poc
+          submodules: false
+
+      - name: Checkout exact IlkRegistry source
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/ilk-registry
+          ref: 1d65fb6e17c28e9e94ac88f0d8ccad04d8945f3c
+          path: upstream/ilk-registry
+
+      - name: Checkout exact spell archive
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/spells-mainnet
+          ref: 6e90e066cfc2102bc864e23a29f4c744e0a4a1bc
+          path: upstream/spells-mainnet
+
+      - name: Checkout exact governance proposal
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/executive-votes
+          ref: 5f326b5158efd320d2ca1fe6c6cbaafa7664a70f
+          path: upstream/executive-votes
+
+      - name: Checkout exact DssExec source
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/dss-exec-lib
+          ref: 555d1c158f2ab695e04d6de6e603b118d32214c4
+          path: upstream/dss-exec-lib
+
+      - name: Checkout exact OmegaPoker source
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/megapoker
+          ref: 83bd1a6dceba1bcc28eaa54ccd8b8afdbde6fcb5
+          path: upstream/megapoker
+
+      - name: Assemble v4 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-governance-veto-red-team-v4"
+          mkdir -p "$ROOT"/{report,source,references,evidence/focused}
+
+          cp poc/evidence/IMMUNEFI_REPORT.md "$ROOT/report/"
+          cp poc/evidence/TRIAGE_RED_TEAM.md "$ROOT/report/"
+          cp poc/evidence/TRIAGE_OBJECTION_MATRIX.md "$ROOT/report/"
+          cp poc/evidence/VALIDATION_SUMMARY.md "$ROOT/report/"
+          cp poc/evidence/SUBMISSION_FIELDS.md "$ROOT/report/"
+          cp poc/evidence/FINAL_ASSESSMENT.md "$ROOT/report/"
+          cp poc/evidence/PROGRAM_RULES.md "$ROOT/report/"
+
+          cp poc/src/IlkRegistryAtomicGovernanceReversal.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryGovernanceRemovalVeto.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryCurrentMassReAdd.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryPersistence.t.sol "$ROOT/source/"
+          cp poc/src/IlkRegistryDirectSpotterSingleControl.t.sol "$ROOT/source/"
+          cp poc/foundry.toml "$ROOT/source/"
+          cp poc/.gitmodules "$ROOT/source/"
+
+          cp upstream/ilk-registry/src/IlkRegistry.sol "$ROOT/references/IlkRegistry.sol"
+          cp upstream/ilk-registry/src/IlkRegistry.t.sol "$ROOT/references/IlkRegistry.official-tests.sol"
+          cp upstream/ilk-registry/README.md "$ROOT/references/IlkRegistry.README.md"
+          cp upstream/spells-mainnet/archive/2025-08-07-DssSpell/DssSpell.sol "$ROOT/references/2025-08-07-DssSpell.sol"
+          cp upstream/spells-mainnet/archive/2025-08-07-DssSpell/DssSpell.t.sol "$ROOT/references/2025-08-07-DssSpell.official-test.sol"
+          cp 'upstream/executive-votes/2025/executive-vote-2025-08-07-deactivate-morpho-ddm-chainlog-management.md' "$ROOT/references/2025-08-07-governance-proposal.md"
+          cp upstream/dss-exec-lib/src/DssExec.sol "$ROOT/references/DssExec.sol"
+          cp upstream/megapoker/src/OmegaPoker.sol "$ROOT/references/OmegaPoker.sol"
+
+          gh run download "$VALIDATION_RUN" \
+            --repo dimin4241-svg/fluid-contracts-public \
+            --name sky-governance-veto-validation-v4 \
+            --dir "$ROOT/evidence/focused"
+
+          cat > "$ROOT/REPRODUCE.md" <<'EOF'
+          # Reproduction
+
+          ```bash
+          git clone https://github.com/dimin4241-svg/dss-emergency-spells.git
+          cd dss-emergency-spells
+          git checkout audit/ilk-registry-readd-proof
+          git submodule update --init --recursive
+          export ETH_RPC_URL='<ARCHIVE_CAPABLE_ETHEREUM_RPC>'
+
+          forge build
+
+          forge test --threads 1 --match-path src/IlkRegistryAtomicGovernanceReversal.t.sol \
+            --match-test testOneUnprivilegedTransactionCastsSpellAndReversesCleanup -vvvv
+
+          forge test --threads 1 --match-path src/IlkRegistryGovernanceRemovalVeto.t.sol \
+            --match-test testPublicCallerCanVetoRepeatedGovernanceRemovalCycles -vvvv
+
+          forge test --threads 1 --match-path src/IlkRegistryCurrentMassReAdd.t.sol -vvvv
+          forge test --threads 1 --match-path src/IlkRegistryPersistence.t.sol -vvvv
+
+          forge test --threads 1 --match-path src/IlkRegistryDirectSpotterSingleControl.t.sol \
+            --match-test testDirectPublicOracleAndSpotterPathMatchesRegistryOmegaResult -vvvv
+          ```
+
+          Pinned blocks:
+
+          - `23,118,263`: one block before the real cleanup spell cast; Registry count 72.
+          - `25,694,337`: current-state snapshot used for deterministic proofs; Registry count 35.
+          EOF
+
+          cat > "$ROOT/MANIFEST.md" <<EOF
+          # Manifest
+
+          ## Production addresses
+
+          - IlkRegistry: \`0x5a464C28D19848f44199D003BeF5ecc87d090F87\`
+          - Cleanup spell: \`0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5\`
+          - OmegaPoker used only for target-set membership proof: \`0xDd538C362dF996727054AC8Fb67ef5394eC9b8b9\`
+
+          ## Validation
+
+          - Focused validation run: \`$VALIDATION_RUN\`
+          - Package source branch commit: \`$(git -C poc rev-parse HEAD)\`
+
+          ## Pinned upstream revisions
+
+          - IlkRegistry: \`1d65fb6e17c28e9e94ac88f0d8ccad04d8945f3c\`
+          - spells-mainnet: \`6e90e066cfc2102bc864e23a29f4c744e0a4a1bc\`
+          - executive-votes: \`5f326b5158efd320d2ca1fe6c6cbaafa7664a70f\`
+          - dss-exec-lib: \`555d1c158f2ab695e04d6de6e603b118d32214c4\`
+          - megapoker: \`83bd1a6dceba1bcc28eaa54ccd8b8afdbde6fcb5\`
+
+          ## Submission status
+
+          This v4 package supersedes the earlier MCD_VAT/Chainlog-framed v3 package.
+          EOF
+
+          cat > "$ROOT/verify.py" <<'PY'
+          #!/usr/bin/env python3
+          from __future__ import annotations
+
+          import hashlib
+          import pathlib
+          import sys
+
+          root = pathlib.Path(__file__).resolve().parent
+          errors: list[str] = []
+
+          for raw in (root / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              if not raw.strip():
+                  continue
+              expected, rel = raw.split("  ", 1)
+              path = root / rel
+              if not path.is_file():
+                  errors.append(f"missing: {rel}")
+                  continue
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected:
+                  errors.append(f"hash mismatch: {rel}")
+
+          required = {
+              "evidence/focused/summary.log": [
+                  "Compiler run successful!",
+                  "CASE_PASS atomic-real-spell-reversal",
+                  "CASE_PASS current-exact-addability",
+                  "CASE_PASS repeated-governance-veto",
+                  "CASE_PASS persistence-and-mitigation",
+                  "CASE_PASS direct-oracle-causality-control",
+                  "CASE_PASS residual-debt-negative-control",
+              ],
+              "report/IMMUNEFI_REPORT.md": [
+                  "repeatedly veto governance removal",
+                  "governance removeAuth cycles 3",
+                  "final values equal",
+                  "does not claim",
+              ],
+              "report/TRIAGE_RED_TEAM.md": [
+                  "Likely disposition",
+                  "spell-composition",
+                  "MCD_VAT must therefore not be selected",
+              ],
+              "report/FINAL_ASSESSMENT.md": [
+                  "low-confidence bounty report",
+                  "Accepted under Critical governance wording",
+              ],
+          }
+
+          for rel, needles in required.items():
+              path = root / rel
+              if not path.is_file():
+                  errors.append(f"required file missing: {rel}")
+                  continue
+              text = path.read_text(encoding="utf-8", errors="replace")
+              for needle in needles:
+                  if needle not in text:
+                      errors.append(f"missing marker in {rel}: {needle}")
+
+          report = (root / "report/IMMUNEFI_REPORT.md").read_text(encoding="utf-8")
+          banned_report_phrases = [
+              "reactivates retired paths in MCD_VAT",
+              "Primary asset: MCD_VAT",
+              "Primary selection: **MCD_VAT**",
+              "defeats both retirement controls and reaches MCD_VAT",
+          ]
+          for phrase in banned_report_phrases:
+              if phrase in report:
+                  errors.append(f"superseded report framing present: {phrase}")
+
+          banned_names = {
+              "IlkRegistryAtomicRace.t.sol",
+              "IlkRegistryTargetScan.t.sol",
+              "IlkRegistryRemovalRaceFormalProof.md",
+              "IlkRegistryAtomicOracleRetirementProof.t.sol",
+              "IlkRegistryCurrentAtomicVatPropagation.t.sol",
+          }
+          names = {p.name for p in root.rglob("*") if p.is_file()}
+          for name in sorted(banned_names & names):
+              errors.append(f"excluded artifact present: {name}")
+
+          if errors:
+              print("VALIDATION FAILED")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+
+          print("VALIDATION PASSED")
+          print("Hashes, focused proofs, adversarial controls, and superseded-framing exclusions passed.")
+          PY
+          chmod +x "$ROOT/verify.py"
+
+          (
+            cd "$ROOT"
+            find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            python3 verify.py
+          )
+
+      - name: Create deterministic package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/sky-ilk-registry-governance-veto-red-team-v4"
+          find "$ROOT" -exec touch -h -t 202608060000.00 {} +
+          cd "$GITHUB_WORKSPACE"
+          zip -X -q -r sky-ilk-registry-governance-veto-red-team-v4.zip \
+            sky-ilk-registry-governance-veto-red-team-v4
+          sha256sum sky-ilk-registry-governance-veto-red-team-v4.zip | tee PACKAGE_SHA256.txt
+
+      - name: Upload v4 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-ilk-registry-governance-veto-red-team-v4
+          path: |
+            sky-ilk-registry-governance-veto-red-team-v4.zip
+            PACKAGE_SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
