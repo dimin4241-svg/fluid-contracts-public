@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -11,7 +12,13 @@ from eth_abi import encode
 from eth_utils import keccak, to_checksum_address
 from web3 import Web3
 
-RPC_URL = os.environ.get("PLASMA_RPC_URL", "https://rpc.plasma.to")
+RPC_URLS = [
+    x for x in [
+        os.environ.get("PLASMA_RPC_URL", ""),
+        "https://plasma-rpc.publicnode.com",
+        "https://rpc.plasma.to",
+    ] if x
+]
 DEPLOYMENTS = pathlib.Path("deployments/plasma")
 
 
@@ -19,8 +26,9 @@ def selector(signature: str) -> bytes:
     return keccak(text=signature)[:4]
 
 
-def make_w3() -> Web3:
-    return Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={"timeout": 8}))
+def make_w3(vault_id: int = 0) -> Web3:
+    url = RPC_URLS[vault_id % len(RPC_URLS)]
+    return Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 8}))
 
 
 def load_address(name: str) -> str:
@@ -28,10 +36,13 @@ def load_address(name: str) -> str:
 
 
 def call_raw(w3: Web3, to: str, signature: str, args: bytes = b"") -> bytes | None:
-    try:
-        return bytes(w3.eth.call({"to": to, "data": selector(signature) + args}))
-    except Exception:
-        return None
+    for attempt in range(3):
+        try:
+            return bytes(w3.eth.call({"to": to, "data": selector(signature) + args}))
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.25 * (attempt + 1))
+    return None
 
 
 def call_uint(w3: Web3, to: str, signature: str, args: bytes = b"") -> int | None:
@@ -47,45 +58,49 @@ def call_address(w3: Web3, to: str, signature: str) -> str | None:
 
 
 def inspect(factory: str, vault_id: int) -> dict[str, Any] | None:
-    w3 = make_w3()
-    out = call_raw(w3, factory, "getVaultAddress(uint256)", encode(["uint256"], [vault_id]))
-    if not out or len(out) < 32:
-        return None
-    vault = to_checksum_address("0x" + out[-20:].hex())
-    if not w3.eth.get_code(vault):
-        return None
-    supply = call_address(w3, vault, "SUPPLY()")
-    borrow = call_address(w3, vault, "BORROW()")
-    supply_is_dex = bool(supply and call_raw(w3, supply, "TOKEN_0()") and call_raw(w3, supply, "TOKEN_1()"))
-    borrow_is_dex = bool(borrow and call_raw(w3, borrow, "TOKEN_0()") and call_raw(w3, borrow, "TOKEN_1()"))
-    return {
-        "vault_id": vault_id,
-        "reported_id": call_uint(w3, vault, "VAULT_ID()"),
-        "vault": vault,
-        "supply": supply,
-        "borrow": borrow,
-        "oracle": call_address(w3, vault, "ORACLE()"),
-        "supply_token0": call_address(w3, vault, "SUPPLY_TOKEN0()"),
-        "supply_token1": call_address(w3, vault, "SUPPLY_TOKEN1()"),
-        "borrow_token0": call_address(w3, vault, "BORROW_TOKEN0()"),
-        "borrow_token1": call_address(w3, vault, "BORROW_TOKEN1()"),
-        "supply_is_dex": supply_is_dex,
-        "borrow_is_dex": borrow_is_dex,
-        "t4_candidate": supply_is_dex and borrow_is_dex,
-    }
+    try:
+        w3 = make_w3(vault_id)
+        out = call_raw(w3, factory, "getVaultAddress(uint256)", encode(["uint256"], [vault_id]))
+        if not out or len(out) < 32:
+            return None
+        vault = to_checksum_address("0x" + out[-20:].hex())
+        reported_id = call_uint(w3, vault, "VAULT_ID()")
+        if reported_id != vault_id:
+            return None
+        supply = call_address(w3, vault, "SUPPLY()")
+        borrow = call_address(w3, vault, "BORROW()")
+        supply_is_dex = bool(supply and call_raw(w3, supply, "TOKEN_0()") and call_raw(w3, supply, "TOKEN_1()"))
+        borrow_is_dex = bool(borrow and call_raw(w3, borrow, "TOKEN_0()") and call_raw(w3, borrow, "TOKEN_1()"))
+        return {
+            "vault_id": vault_id,
+            "reported_id": reported_id,
+            "vault": vault,
+            "supply": supply,
+            "borrow": borrow,
+            "oracle": call_address(w3, vault, "ORACLE()"),
+            "supply_token0": call_address(w3, vault, "SUPPLY_TOKEN0()"),
+            "supply_token1": call_address(w3, vault, "SUPPLY_TOKEN1()"),
+            "borrow_token0": call_address(w3, vault, "BORROW_TOKEN0()"),
+            "borrow_token1": call_address(w3, vault, "BORROW_TOKEN1()"),
+            "supply_is_dex": supply_is_dex,
+            "borrow_is_dex": borrow_is_dex,
+            "t4_candidate": supply_is_dex and borrow_is_dex,
+        }
+    except Exception as exc:
+        return {"vault_id": vault_id, "error": repr(exc), "t4_candidate": False}
 
 
 def main() -> int:
     w3 = make_w3()
     if not w3.is_connected():
-        raise RuntimeError(f"RPC unavailable: {RPC_URL}")
+        raise RuntimeError("No Plasma RPC available")
     factory = load_address("VaultFactory.json")
     total = call_uint(w3, factory, "totalVaults()")
     if total is None:
         raise RuntimeError("totalVaults() failed")
 
     rows: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=16) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = [pool.submit(inspect, factory, i) for i in range(1, total + 1)]
         for future in as_completed(futures):
             row = future.result()
@@ -99,7 +114,8 @@ def main() -> int:
         "factory": factory,
         "total_vaults": total,
         "deployment_t4_files": sorted(p.name for p in DEPLOYMENTS.glob("VaultT4*.json")),
-        "t4_candidates": [r for r in rows if r["t4_candidate"]],
+        "t4_candidates": [r for r in rows if r.get("t4_candidate")],
+        "errors": [r for r in rows if "error" in r],
         "vaults": rows,
     }
     text = json.dumps(result, indent=2)
