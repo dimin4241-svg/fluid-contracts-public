@@ -1,4 +1,4 @@
-name: Security Sky atomic governance cleanup reversal v2
+name: Security Sky atomic governance cleanup reversal v3
 
 on:
   push:
@@ -75,14 +75,14 @@ jobs:
         run: |
           {
             cat evidence-sky-atomic-reversal/rpc.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|spell done|standard Join cleanup targets|restored atomically|final registry count|atomic call gas used|block gas limit)' evidence-sky-atomic-reversal/forge-test.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|spell done|Join-backed cleanup targets|restored atomically|final registry count|atomic call gas used|block gas limit)' evidence-sky-atomic-reversal/forge-test.log 2>/dev/null || true
           } | tee evidence-sky-atomic-reversal/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-atomic-governance-cleanup-reversal-v2
+          name: sky-atomic-governance-cleanup-reversal-v3
           path: evidence-sky-atomic-reversal/
           if-no-files-found: error
           retention-days: 30
