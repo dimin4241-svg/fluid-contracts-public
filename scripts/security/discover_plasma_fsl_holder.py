@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Discover the largest live fSL6 holder at an exact Plasma fork block."""
+"""Discover and RPC-verify a live fSL6 holder at an exact Plasma fork block."""
 
 from __future__ import annotations
 
@@ -9,18 +9,20 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 RPC_URL = os.environ["PLASMA_RPC_URL"]
 FORK_BLOCK = int(os.environ["PLASMA_FORK_BLOCK"])
 WRAPPER = "0x983107BB3dcb71f3A30176114D8a17c454A62514"
-TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 ZERO = "0x0000000000000000000000000000000000000000"
 DEAD = "0x000000000000000000000000000000000000dead"
 BALANCE_OF_SELECTOR = "70a08231"
 TOTAL_SUPPLY_SELECTOR = "18160ddd"
+ROUTESCAN_HOLDERS_URL = (
+    "https://api.routescan.io/v2/network/mainnet/evm/9745/erc20/"
+    f"{WRAPPER}/holders?limit=100"
+)
 EVIDENCE_PATH = Path("evidence-smart-lending-share-interaction/holder-inventory.json")
 GITHUB_ENV = Path(os.environ["GITHUB_ENV"])
 
@@ -41,70 +43,38 @@ def rpc(method: str, params: list[Any], retries: int = 5) -> Any:
 
     for attempt in range(retries):
         try:
-            with urllib.request.urlopen(request, timeout=45) as response:
+            with urllib.request.urlopen(request, timeout=30) as response:
                 body = json.loads(response.read().decode())
             if "error" in body:
                 raise RuntimeError(f"RPC {method} error: {body['error']}")
             return body["result"]
-        except (urllib.error.URLError, TimeoutError, RuntimeError) as exc:
+        except (urllib.error.URLError, TimeoutError, RuntimeError):
             if attempt + 1 == retries:
                 raise
             time.sleep(0.5 * (2**attempt))
     raise AssertionError("unreachable")
 
 
-def block_tag(block_number: int) -> str:
-    return hex(block_number)
-
-
-def code_exists(block_number: int) -> bool:
-    return rpc("eth_getCode", [WRAPPER, block_tag(block_number)]) not in ("0x", "0x0")
-
-
-def discover_creation_block() -> int:
-    if not code_exists(FORK_BLOCK):
-        raise RuntimeError(f"wrapper has no code at fork block {FORK_BLOCK}")
-
-    low = 0
-    high = FORK_BLOCK
-    while low < high:
-        middle = (low + high) // 2
-        if code_exists(middle):
-            high = middle
-        else:
-            low = middle + 1
-    return low
-
-
-def get_logs_recursive(start: int, end: int) -> list[dict[str, Any]]:
-    try:
-        return rpc(
-            "eth_getLogs",
-            [
-                {
-                    "address": WRAPPER,
-                    "fromBlock": block_tag(start),
-                    "toBlock": block_tag(end),
-                    "topics": [TRANSFER_TOPIC],
-                }
-            ],
-            retries=3,
-        )
-    except Exception:
-        if start >= end:
-            raise
-        middle = (start + end) // 2
-        return get_logs_recursive(start, middle) + get_logs_recursive(middle + 1, end)
-
-
-def topic_address(topic: str) -> str:
-    return "0x" + topic[-40:].lower()
+def get_json(url: str, retries: int = 5) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json", "User-Agent": "fluid-security-probe"},
+    )
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode())
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            if attempt + 1 == retries:
+                raise
+            time.sleep(0.5 * (2**attempt))
+    raise AssertionError("unreachable")
 
 
 def eth_call(data: str) -> int:
     result = rpc(
         "eth_call",
-        [{"to": WRAPPER, "data": data}, block_tag(FORK_BLOCK)],
+        [{"to": WRAPPER, "data": data}, hex(FORK_BLOCK)],
     )
     return int(result, 16)
 
@@ -115,64 +85,48 @@ def balance_of(account: str) -> int:
 
 def main() -> None:
     EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    creation_block = discover_creation_block()
-    print(f"wrapper creation block: {creation_block}")
 
-    balances: defaultdict[str, int] = defaultdict(int)
-    transfer_count = 0
-    outer_chunk = 250_000
-
-    for start in range(creation_block, FORK_BLOCK + 1, outer_chunk):
-        end = min(start + outer_chunk - 1, FORK_BLOCK)
-        logs = get_logs_recursive(start, end)
-        transfer_count += len(logs)
-        for log in logs:
-            topics = log.get("topics", [])
-            if len(topics) < 3:
-                continue
-            sender = topic_address(topics[1])
-            recipient = topic_address(topics[2])
-            value = int(log["data"], 16)
-            if sender != ZERO:
-                balances[sender] -= value
-            if recipient != ZERO:
-                balances[recipient] += value
-        print(f"scanned {start}-{end}: {len(logs)} transfers")
+    indexed = get_json(ROUTESCAN_HOLDERS_URL)
+    items = indexed.get("items")
+    if not isinstance(items, list) or not items:
+        raise RuntimeError(f"Routescan returned no holder items: {indexed}")
 
     excluded = {ZERO, DEAD, WRAPPER.lower()}
-    positive = [(address, amount) for address, amount in balances.items() if amount > 0 and address not in excluded]
-    positive.sort(key=lambda item: item[1], reverse=True)
-    if not positive:
-        raise RuntimeError("no positive fSL6 holders reconstructed from Transfer logs")
-
     verified: list[dict[str, Any]] = []
-    for address, reconstructed in positive[:50]:
-        live = balance_of(address)
-        if live > 0:
+
+    for item in items:
+        address = str(item.get("address", "")).lower()
+        if len(address) != 42 or address in excluded:
+            continue
+        indexed_balance = int(item.get("balance", "0"))
+        exact_fork_balance = balance_of(address)
+        if exact_fork_balance > 0:
             verified.append(
                 {
                     "address": address,
-                    "reconstructed_balance": str(reconstructed),
-                    "live_balance": str(live),
+                    "routescan_balance": str(indexed_balance),
+                    "fork_balance": str(exact_fork_balance),
+                    "routescan_percentage": item.get("percentage"),
                 }
             )
 
-    verified.sort(key=lambda item: int(item["live_balance"]), reverse=True)
+    verified.sort(key=lambda item: int(item["fork_balance"]), reverse=True)
     if not verified:
-        raise RuntimeError("no holder retained a positive balance at the selected fork block")
+        raise RuntimeError("no Routescan holder retained a positive balance at the fork block")
 
     total_supply = eth_call("0x" + TOTAL_SUPPLY_SELECTOR)
     holder = verified[0]["address"]
-    holder_balance = int(verified[0]["live_balance"])
+    holder_balance = int(verified[0]["fork_balance"])
 
     if holder_balance <= 0 or holder_balance > total_supply:
         raise RuntimeError("invalid discovered holder balance")
 
     evidence = {
+        "source": "Routescan ERC20 holders, verified by Plasma eth_call at exact fork block",
+        "routescan_url": ROUTESCAN_HOLDERS_URL,
         "fork_block": FORK_BLOCK,
         "wrapper": WRAPPER,
-        "creation_block": creation_block,
-        "transfer_count": transfer_count,
+        "routescan_items": len(items),
         "total_supply": str(total_supply),
         "selected_holder": holder,
         "selected_holder_balance": str(holder_balance),
@@ -184,11 +138,10 @@ def main() -> None:
     with GITHUB_ENV.open("a") as env_file:
         env_file.write(f"FSL_HOLDER={holder}\n")
         env_file.write(f"FSL_HOLDER_BALANCE={holder_balance}\n")
-        env_file.write(f"FSL_CREATION_BLOCK={creation_block}\n")
 
     print(
         "HolderInventory("
-        f"forkBlock={FORK_BLOCK}, creationBlock={creation_block}, transfers={transfer_count}, "
+        f"forkBlock={FORK_BLOCK}, source=Routescan+RPC, indexedItems={len(items)}, "
         f"holder={holder}, holderBalance={holder_balance}, totalSupply={total_supply}, "
         f"holderPpm={(holder_balance * 1_000_000) // total_supply})"
     )
