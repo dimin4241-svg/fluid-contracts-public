@@ -1,4 +1,4 @@
-name: Security Sky OmegaPoker impact
+name: Security Sky OmegaPoker impact standard compile
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
         with:
           version: stable
 
-      - name: Select stable Ethereum RPC
+      - name: Select stable archive Ethereum RPC
         shell: bash
         run: |
           set -euo pipefail
@@ -42,9 +42,9 @@ jobs:
             'https://rpc.payload.de'
           )
           for rpc in "${endpoints[@]}"; do
-            if output=$(timeout 30 cast call 0xDd538C362dF996727054AC8Fb67ef5394eC9b8b9 'ilkCount()(uint256)' --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
+            if output=$(timeout 30 cast call 0xDd538C362dF996727054AC8Fb67ef5394eC9b8b9 'ilkCount()(uint256)' --block 25694337 --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
               echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
-              echo "selected=$rpc current_omega_ilk_count=$output" | tee evidence-sky-omega-poker/rpc.log
+              echo "selected=$rpc pinned_omega_ilk_count=$output" | tee evidence-sky-omega-poker/rpc.log
               exit 0
             fi
           done
@@ -56,8 +56,6 @@ jobs:
         run: |
           set -o pipefail
           forge test \
-            --via-ir \
-            --optimize \
             --match-path src/IlkRegistryOmegaPokerImpact.t.sol \
             --match-test testMassReAddChangesDeployedOmegaPokerExecution \
             -vvvv 2>&1 | tee ../evidence-sky-omega-poker/forge-test.log
@@ -75,7 +73,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-omega-poker-impact-v2
+          name: sky-omega-poker-impact-standard
           path: evidence-sky-omega-poker/
           if-no-files-found: error
           retention-days: 30
