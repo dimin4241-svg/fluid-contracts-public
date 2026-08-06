@@ -5,6 +5,7 @@ on:
     branches:
       - audit/plasma-t4-liquidation-20260806
     paths:
+      - 'test/security/PlasmaVaultT4OneSidedBorrowLiquidation.t.sol'
       - '.github/workflows/plasma-t4-one-sided-borrow-liquidation.yml'
   workflow_dispatch:
 
