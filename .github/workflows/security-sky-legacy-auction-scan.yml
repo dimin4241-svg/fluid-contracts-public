@@ -1,0 +1,72 @@
+name: Security Sky legacy auction state scan
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-legacy-auction-scan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Run scan with RPC failover
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence-sky-legacy-auctions
+          endpoints=(
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://mainnet.gateway.tenderly.co'
+            'https://eth-mainnet.public.blastapi.io'
+            'https://rpc.payload.de'
+          )
+          passed=0
+          for rpc in "${endpoints[@]}"; do
+            log=../evidence-sky-legacy-auctions/forge-test.log
+            set +e
+            ETH_RPC_URL="$rpc" forge test \
+              --match-path src/IlkRegistryLegacyAuctionStateScan.t.sol \
+              -vvvv > "$log" 2>&1
+            rc=$?
+            set -e
+            cat "$log"
+            if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
+              echo "CASE_PASS legacy-auction-state-scan rpc=$rpc" | tee ../evidence-sky-legacy-auctions/summary.log
+              passed=1
+              break
+            fi
+          done
+          [[ $passed -eq 1 ]]
+          grep -E '(legacy Clipper|active auctions|Vat.gem|Vat.dai|breaker level|restored Clipper entries|total active|PASS|Suite result)' "$log" \
+            | tee ../evidence-sky-legacy-auctions/key-results.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-legacy-auction-state-scan
+          path: evidence-sky-legacy-auctions/
+          if-no-files-found: error
+          retention-days: 30
