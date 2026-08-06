@@ -1,0 +1,124 @@
+name: Security Sky adjacent deployed deep scan
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-adjacent-deep-scan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: stusds
+            repo: sky-ecosystem/stusds
+            ref: dev
+          - name: sky-oapp-oft
+            repo: sky-ecosystem/sky-oapp-oft
+            ref: main
+          - name: pas
+            repo: sky-ecosystem/pas
+            ref: dev
+          - name: nfat
+            repo: sky-ecosystem/nfat
+            ref: dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          path: target
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        if: matrix.name != 'sky-oapp-oft'
+        with:
+          version: stable
+      - name: Install Slither
+        run: python3 -m pip install --disable-pip-version-check slither-analyzer
+      - name: Build and scan Foundry repos
+        if: matrix.name != 'sky-oapp-oft'
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          (cd target && forge build) > evidence/build.log 2>&1
+          echo $? > evidence/build-exit.txt
+          (cd target && slither . --exclude-dependencies --json ../evidence/slither.json) > evidence/slither.log 2>&1
+          echo $? > evidence/slither-exit.txt
+      - name: Static scan OFT repo
+        if: matrix.name == 'sky-oapp-oft'
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          # Keep the scan deterministic and source-focused; npm dependency graph is large.
+          cp -R target/contracts evidence/contracts
+          grep -RInE 'function |delegatecall|\.call\(|safeTransfer|safeTransferFrom|mint\(|burn\(|_checkAndUpdateRateLimit|lzReceive|_lzReceive|nonce|guid|peer|compose|feeBalance|unchecked|assembly' target/contracts > evidence/high-risk-lines.txt || true
+          : > evidence/slither.log
+      - name: Generate semantic attack-surface report
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          python3 - <<'PY'
+          import pathlib,re,json
+          roots=[p for p in [pathlib.Path('target/src'),pathlib.Path('target/contracts')] if p.exists()]
+          rows=[]
+          for root in roots:
+            for p in sorted(root.rglob('*.sol')):
+              s=p.read_text(errors='ignore'); lines=s.splitlines(); i=0
+              while i<len(lines):
+                if re.search(r'\bfunction\b',lines[i]):
+                  st=i; sig=lines[i].strip(); j=i
+                  while '{' not in sig and ';' not in sig and j+1<len(lines) and len(sig)<3000:
+                    j+=1;sig+=' '+lines[j].strip()
+                  m=re.search(r'function\s+([A-Za-z0-9_]*)',sig); vis=re.search(r'\b(external|public)\b',sig)
+                  if m and vis and '{' in sig:
+                    d=sig.count('{')-sig.count('}'); body=[sig];k=j+1
+                    while d>0 and k<len(lines): body.append(lines[k]);d+=lines[k].count('{')-lines[k].count('}');k+=1
+                    b='\n'.join(body)
+                    rows.append(dict(file=str(p),line=st+1,name=m.group(1),sig=sig,
+                      guarded=bool(re.search(r'onlyOwner|onlyRole|\bauth\b|\btoll\b|\bcop\b|onlyEndpoint|_checkPeer|msg\.sender\s*==',sig+b[:1000])),
+                      token_calls=len(re.findall(r'transferFrom|safeTransferFrom|\.transfer\b|safeTransfer\b|mint\(|burn\(',b)),
+                      external_calls=len(re.findall(r'\.call\b|delegatecall|functionCall|\.doCall|lzReceive|_lzReceive',b)),
+                      state_before_call=bool(re.search(r'(\-=|\+=|delete | = ).{0,200}(transfer|\.call|mint\(|burn\()',b,re.S)),
+                      state_after_call=bool(re.search(r'(transfer|\.call|mint\(|burn\().{0,400}(\-=|\+=|delete | = )',b,re.S)),
+                      nonce_guid=bool(re.search(r'nonce|guid|hashOperation|salt',b,re.I)),
+                      rate_limit=bool(re.search(r'rate.?limit|amountInFlight|maxChange|hop',b,re.I)),
+                    ))
+                    i=max(i,k-1)
+                i+=1
+          json.dump(rows,open('evidence/functions.json','w'),indent=2)
+          with open('evidence/surface.tsv','w') as f:
+            ks=['file','line','name','guarded','token_calls','external_calls','state_before_call','state_after_call','nonce_guid','rate_limit','sig']
+            f.write('\t'.join(ks)+'\n')
+            for r in rows:f.write('\t'.join(str(r[k]).replace('\t',' ') for k in ks)+'\n')
+          with open('evidence/high-signal.tsv','w') as f:
+            ks=['file','line','name','guarded','token_calls','external_calls','state_before_call','state_after_call','nonce_guid','rate_limit']
+            f.write('\t'.join(ks)+'\n')
+            for r in rows:
+              if (not r['guarded'] and (r['token_calls'] or r['external_calls'])) or (r['state_after_call'] and not r['guarded']):
+                f.write('\t'.join(str(r[k]) for k in ks)+'\n')
+          PY
+          grep -RInE 'TODO|FIXME|WARNING|assum|known|front.run|reentr|round|precision|overflow|underflow|unchecked|fee.on.transfer|rebas' target/src target/contracts target/README.md 2>/dev/null > evidence/warnings-assumptions.txt || true
+          {
+            echo '=== HIGH SIGNAL PUBLIC FLOWS ==='; cat evidence/high-signal.tsv
+            echo; echo '=== SLITHER FIRST 250 LINES ==='; sed -n '1,250p' evidence/slither.log
+          } > evidence/summary.txt
+          git -C target rev-parse HEAD > evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sky-adjacent-deep-${{ matrix.name }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
