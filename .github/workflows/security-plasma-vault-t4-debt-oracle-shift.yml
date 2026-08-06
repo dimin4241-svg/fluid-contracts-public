@@ -1,0 +1,57 @@
+name: Security Plasma Vault T4 debt oracle shift
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4DebtOracleShift.t.sol'
+      - '.github/workflows/security-plasma-vault-t4-debt-oracle-shift.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-shift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated harness
+        shell: bash
+        run: |
+          rm -rf audit/t4-debt-oracle-shift
+          mkdir -p audit/t4-debt-oracle-shift/test audit/t4-debt-oracle-shift/lib evidence-plasma-vault-t4-debt-oracle-shift
+          cp test/security/PlasmaVaultT4DebtOracleShift.t.sol audit/t4-debt-oracle-shift/test/
+          cp -R lib/forge-std audit/t4-debt-oracle-shift/lib/forge-std
+      - name: Run oracle shift probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/t4-debt-oracle-shift --via-ir \
+            --match-path test/PlasmaVaultT4DebtOracleShift.t.sol -vvvv 2>&1 \
+            | tee evidence-plasma-vault-t4-debt-oracle-shift/oracle-shift.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E "OracleShiftResult\(|Suite result|Failing tests|Error:|revert" \
+            evidence-plasma-vault-t4-debt-oracle-shift/oracle-shift.log \
+            | tee evidence-plasma-vault-t4-debt-oracle-shift/summary.log || true
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-debt-oracle-shift
+          path: evidence-plasma-vault-t4-debt-oracle-shift/
+          if-no-files-found: error
+          retention-days: 30
