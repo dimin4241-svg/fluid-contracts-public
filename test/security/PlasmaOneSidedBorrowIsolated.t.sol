@@ -12,8 +12,16 @@ interface IFactoryIsolated {
 }
 
 interface IVaultIsolated {
-    function operate(uint256,int256,int256,int256,int256,int256,int256,address)
-        external payable returns (uint256,int256,int256);
+    function operate(
+        uint256,
+        int256,
+        int256,
+        int256,
+        int256,
+        int256,
+        int256,
+        address
+    ) external payable returns (uint256, int256, int256);
 }
 
 interface IOracleIsolated {
@@ -52,18 +60,7 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
         uint256 errorId,
         bytes32 revertHash
     );
-    event IsolatedDeposit(
-        bool indexed borrowGho,
-        uint256 requested1e18,
-        uint256 indexed nftId,
-        int256 colShares,
-        uint256 oracleBefore,
-        uint256 oracleAfter,
-        int256 oracleDeltaPpm,
-        bytes4 simulationSelector,
-        uint256 simulationErrorId,
-        bool liquidatable
-    );
+
     event IsolatedBorrow(
         bool indexed borrowGho,
         uint256 requested1e18,
@@ -73,17 +70,11 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
         uint256 receivedUsdt0,
         uint256 oracleBefore,
         uint256 oracleAfter,
-        int256 oracleDeltaPpm
-    );
-    event IsolatedLiquidation(
-        bool indexed borrowGho,
-        uint256 requested1e18,
-        uint256 indexed nftId,
-        bytes4 selector,
-        bool liquidatable,
-        uint256 colLiquidated,
-        uint256 debtLiquidated,
-        uint256 errorId,
+        int256 oracleDeltaPpm,
+        bool liquidatableBefore,
+        bool liquidatableAfter,
+        bytes4 simulationSelectorAfter,
+        uint256 simulationErrorAfter,
         bool eligibilityChanged
     );
 
@@ -92,27 +83,33 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
         forkBlock = vm.envUint("PLASMA_FORK_BLOCK");
         vm.createSelectFork(rpcUrl, forkBlock);
         assertEq(block.chainid, 9745);
+        assertEq(block.number, forkBlock);
         assertGt(VAULT.code.length, 0);
     }
 
     function _selector(bytes memory data) internal pure returns (bytes4 value) {
         if (data.length < 4) return bytes4(0);
-        assembly ("memory-safe") { value := mload(add(data, 0x20)) }
+        assembly ("memory-safe") {
+            value := mload(add(data, 0x20))
+        }
     }
 
     function _word(bytes memory data, uint256 index) internal pure returns (uint256 value) {
         require(data.length >= 4 + (index + 1) * 32, "short data");
-        assembly ("memory-safe") { value := mload(add(add(data, 0x24), mul(index, 0x20))) }
+        assembly ("memory-safe") {
+            value := mload(add(add(data, 0x24), mul(index, 0x20)))
+        }
     }
 
     function _errorId(bytes memory data) internal pure returns (uint256) {
         return data.length >= 36 ? _word(data, 0) : 0;
     }
 
-    function _delta(uint256 afterValue, uint256 beforeValue) internal pure returns (int256) {
-        return afterValue >= beforeValue
+    function _deltaPpm(uint256 afterValue, uint256 beforeValue) internal pure returns (int256) {
+        int256 delta = afterValue >= beforeValue
             ? int256(afterValue - beforeValue)
             : -int256(beforeValue - afterValue);
+        return delta * int256(1e6) / int256(beforeValue);
     }
 
     function _approve(address token) internal {
@@ -127,7 +124,7 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
         (bool ok, bytes memory data) = VAULT.call(
             abi.encodeWithSignature("simulateLiquidate(uint256,bool)", type(uint256).max, false)
         );
-        require(!ok, "simulation succeeded");
+        require(!ok, "simulation unexpectedly returned");
         result.selector = _selector(data);
         if (result.selector == LIQ_RESULT && data.length >= 68) {
             result.liquidatable = true;
@@ -140,14 +137,14 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
 
     function executeCase(bool borrowGho, uint256 requested1e18) external {
         require(msg.sender == address(this), "self only");
+
         deal(GHO, BORROWER, COL_GHO);
         deal(USDT0, BORROWER, COL_USDT0);
         _approve(GHO);
         _approve(USDT0);
 
-        uint256 oracleBeforeDeposit = IOracleIsolated(ORACLE).getExchangeRateLiquidate();
         vm.prank(BORROWER);
-        (uint256 nftId, int256 colShares, int256 initialDebtShares) = IVaultIsolated(VAULT).operate(
+        (uint256 nftId,, int256 initialDebtShares) = IVaultIsolated(VAULT).operate(
             0,
             int256(COL_GHO),
             int256(COL_USDT0),
@@ -159,23 +156,12 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
         );
         require(initialDebtShares == 0, "initial debt");
         require(IFactoryIsolated(FACTORY).ownerOf(nftId) == BORROWER, "owner mismatch");
-        uint256 oracleAfterDeposit = IOracleIsolated(ORACLE).getExchangeRateLiquidate();
-        Sim memory beforeBorrow = _simulate();
-        emit IsolatedDeposit(
-            borrowGho,
-            requested1e18,
-            nftId,
-            colShares,
-            oracleBeforeDeposit,
-            oracleAfterDeposit,
-            _delta(oracleAfterDeposit, oracleBeforeDeposit) * int256(1e6) / int256(oracleBeforeDeposit),
-            beforeBorrow.selector,
-            beforeBorrow.errorId,
-            beforeBorrow.liquidatable
-        );
 
+        uint256 oracleBefore = IOracleIsolated(ORACLE).getExchangeRateLiquidate();
+        Sim memory beforeBorrow = _simulate();
         uint256 ghoBefore = IERC20Isolated(GHO).balanceOf(BORROWER);
         uint256 usdtBefore = IERC20Isolated(USDT0).balanceOf(BORROWER);
+
         vm.prank(BORROWER);
         (, int256 noColShares, int256 debtShares) = IVaultIsolated(VAULT).operate(
             nftId,
@@ -184,11 +170,14 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
             0,
             borrowGho ? int256(requested1e18) : int256(0),
             borrowGho ? int256(0) : int256(requested1e18 / 1e12),
-            1,
+            type(int256).max,
             BORROWER
         );
-        require(noColShares == 0 && debtShares > 0, "borrow result");
-        uint256 oracleAfterBorrow = IOracleIsolated(ORACLE).getExchangeRateLiquidate();
+        require(noColShares == 0, "unexpected collateral change");
+        require(debtShares > 0, "no debt shares");
+
+        uint256 oracleAfter = IOracleIsolated(ORACLE).getExchangeRateLiquidate();
+        Sim memory afterBorrow = _simulate();
         emit IsolatedBorrow(
             borrowGho,
             requested1e18,
@@ -196,19 +185,12 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
             debtShares,
             IERC20Isolated(GHO).balanceOf(BORROWER) - ghoBefore,
             IERC20Isolated(USDT0).balanceOf(BORROWER) - usdtBefore,
-            oracleAfterDeposit,
-            oracleAfterBorrow,
-            _delta(oracleAfterBorrow, oracleAfterDeposit) * int256(1e6) / int256(oracleAfterDeposit)
-        );
-        Sim memory afterBorrow = _simulate();
-        emit IsolatedLiquidation(
-            borrowGho,
-            requested1e18,
-            nftId,
-            afterBorrow.selector,
+            oracleBefore,
+            oracleAfter,
+            _deltaPpm(oracleAfter, oracleBefore),
+            beforeBorrow.liquidatable,
             afterBorrow.liquidatable,
-            afterBorrow.col,
-            afterBorrow.debt,
+            afterBorrow.selector,
             afterBorrow.errorId,
             beforeBorrow.liquidatable != afterBorrow.liquidatable
         );
@@ -221,6 +203,7 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
             uint256(1_000_000e18),
             uint256(1_500_000e18)
         ];
+
         for (uint256 direction; direction < 2; ++direction) {
             bool borrowGho = direction == 0;
             for (uint256 i; i < sizes.length; ++i) {
@@ -236,6 +219,7 @@ contract PlasmaOneSidedBorrowIsolatedTest is Test {
                     ok ? 0 : _errorId(reason),
                     ok ? bytes32(0) : keccak256(reason)
                 );
+                require(ok, "corrected isolated case failed");
             }
         }
     }
