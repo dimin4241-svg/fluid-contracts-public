@@ -1,0 +1,98 @@
+name: Security Plasma VaultFactory discovery
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - '.github/workflows/security-plasma-vault-factory-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - name: Checkout branch and deployment submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Discover registry, interfaces, and candidate factory addresses
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p evidence-plasma-vault-factory
+          OUT=evidence-plasma-vault-factory/discovery.log
+          : > "$OUT"
+
+          echo '=== CHAIN ===' | tee -a "$OUT"
+          echo "block=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" | tee -a "$OUT"
+          echo "chainId=$(cast chain-id --rpc-url "$PLASMA_RPC_URL")" | tee -a "$OUT"
+
+          echo '=== RELEVANT PATHS ===' | tee -a "$OUT"
+          find . -type f \
+            | grep -Ei '(plasma|9745|vaultfactory|vault_factory|vaultT4)' \
+            | sort \
+            | tee -a "$OUT" || true
+
+          echo '=== VAULT FACTORY SOURCE SIGNATURES ===' | tee -a "$OUT"
+          grep -RInE 'contract .*Vault.*Factory|interface .*Vault.*Factory|function [A-Za-z0-9_]*(Vault|vault)|function total[A-Za-z0-9_]*Vault' \
+            contracts test deployment deployments scripts 2>/dev/null \
+            | head -n 1000 \
+            | tee -a "$OUT" || true
+
+          echo '=== PLASMA/9745 FILE CONTENT MATCHES ===' | tee -a "$OUT"
+          grep -RInEi 'plasma|chain.?id.{0,20}9745|VaultFactory|VaultT4' \
+            deployment deployments scripts .github 2>/dev/null \
+            | head -n 2000 \
+            | tee -a "$OUT" || true
+
+          echo '=== CANDIDATE ADDRESSES AND CODE SIZE ===' | tee -a "$OUT"
+          CANDIDATES=$(grep -RhoE '0x[0-9a-fA-F]{40}' deployment deployments scripts 2>/dev/null | sort -u || true)
+          for address in $CANDIDATES; do
+            code=$(cast code "$address" --rpc-url "$PLASMA_RPC_URL" 2>/dev/null || true)
+            if [ -n "$code" ] && [ "$code" != "0x" ]; then
+              bytes=$(( (${#code} - 2) / 2 ))
+              echo "$address codeBytes=$bytes" | tee -a "$OUT"
+              for sig in \
+                'totalVaults()(uint256)' \
+                'totalVaults()' \
+                'vaults(uint256)(address)' \
+                'getVaultAddress(uint256)(address)' \
+                'vaultById(uint256)(address)' \
+                'vault(uint256)(address)'; do
+                result=$(cast call "$address" "$sig" 1 --rpc-url "$PLASMA_RPC_URL" 2>/dev/null || true)
+                if [ -n "$result" ]; then
+                  echo "  $sig => $result" | tee -a "$OUT"
+                fi
+              done
+            fi
+          done
+
+      - name: Extract concise summary
+        if: always()
+        shell: bash
+        run: |
+          grep -Ei 'VaultFactory|VaultT4|totalVault|vaults\(|getVaultAddress|vaultById|chainId=|codeBytes=' \
+            evidence-plasma-vault-factory/discovery.log \
+            | tee evidence-plasma-vault-factory/summary.log || true
+
+      - name: Upload discovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-factory-discovery
+          path: evidence-plasma-vault-factory/
+          if-no-files-found: error
+          retention-days: 30
