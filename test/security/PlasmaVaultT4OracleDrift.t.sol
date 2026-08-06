@@ -5,7 +5,6 @@ import {Test} from "forge-std/Test.sol";
 
 interface IERC20DriftProbe {
     function decimals() external view returns (uint8);
-    function balanceOf(address account) external view returns (uint256);
 }
 
 interface IFluidDexDriftProbe {
@@ -49,6 +48,7 @@ interface IPlasmaVaultDriftProbe {
         bytes32 userBorrowSlot;
     }
 
+    function TYPE() external view returns (uint256);
     function constantsView() external view returns (ConstantViews memory);
     function readFromStorage(bytes32 slot) external view returns (uint256);
 }
@@ -192,36 +192,39 @@ contract PlasmaVaultT4OracleDriftTest is Test {
 
         for (uint256 vaultId = 1; vaultId <= totalVaults; ++vaultId) {
             address vault = factory.getVaultAddress(vaultId);
-            try IPlasmaVaultDriftProbe(vault).constantsView() returns (
-                IPlasmaVaultDriftProbe.ConstantViews memory c
-            ) {
-                if (c.vaultType != T4_TYPE) continue;
+            try IPlasmaVaultDriftProbe(vault).TYPE() returns (uint256 vaultType) {
+                if (vaultType != T4_TYPE) continue;
+            } catch {
+                continue;
+            }
 
-                vm.prank(factoryOwner);
-                uint256 vaultVariables = IPlasmaVaultDriftProbe(vault).readFromStorage(bytes32(uint256(0)));
-                uint256 totalBorrowEncoded = (vaultVariables >> 146) & type(uint64).max;
-                if (totalBorrowEncoded == 0) continue;
+            IPlasmaVaultDriftProbe.ConstantViews memory c =
+                IPlasmaVaultDriftProbe(vault).constantsView();
 
-                vm.prank(factoryOwner);
-                uint256 vaultVariables2 = IPlasmaVaultDriftProbe(vault).readFromStorage(bytes32(uint256(1)));
-                uint256 oracleNonce = (vaultVariables2 >> 92) & X30;
-                address oracle = _addressCalc(c.deployer, oracleNonce);
+            vm.prank(factoryOwner);
+            uint256 vaultVariables = IPlasmaVaultDriftProbe(vault).readFromStorage(bytes32(uint256(0)));
+            uint256 totalBorrowEncoded = (vaultVariables >> 146) & type(uint64).max;
+            if (totalBorrowEncoded == 0) continue;
 
-                require(oracle.code.length > 0, "oracle has no code");
-                require(c.borrow.code.length > 0, "borrow DEX has no code");
+            vm.prank(factoryOwner);
+            uint256 vaultVariables2 = IPlasmaVaultDriftProbe(vault).readFromStorage(bytes32(uint256(1)));
+            uint256 oracleNonce = (vaultVariables2 >> 92) & X30;
+            address oracle = _addressCalc(c.deployer, oracleNonce);
 
-                target = Target({
-                    vault: vault,
-                    oracle: oracle,
-                    supplyDex: c.supply,
-                    borrowDex: c.borrow,
-                    borrowToken0: c.borrowToken.token0,
-                    borrowToken1: c.borrowToken.token1,
-                    vaultId: vaultId,
-                    totalBorrowEncoded: totalBorrowEncoded
-                });
-                return target;
-            } catch {}
+            require(oracle.code.length > 0, "oracle has no code");
+            require(c.borrow.code.length > 0, "borrow DEX has no code");
+
+            target = Target({
+                vault: vault,
+                oracle: oracle,
+                supplyDex: c.supply,
+                borrowDex: c.borrow,
+                borrowToken0: c.borrowToken.token0,
+                borrowToken1: c.borrowToken.token1,
+                vaultId: vaultId,
+                totalBorrowEncoded: totalBorrowEncoded
+            });
+            return target;
         }
 
         revert("no active Plasma T4 vault");
