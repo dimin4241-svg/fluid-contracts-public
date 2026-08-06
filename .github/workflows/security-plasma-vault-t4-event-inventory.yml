@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 20
     env:
       PLASMA_RPC_URL: https://rpc.plasma.to
-      VAULT_FACTORY: 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d
+      VAULT_FACTORY: '0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d'
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +34,7 @@ jobs:
           OUT=evidence-plasma-vault-t4-events/vault-t4-events.csv
           RAW=evidence-plasma-vault-t4-events/raw.jsonl
           SUMMARY=evidence-plasma-vault-t4-events/summary.log
-          echo 'blockNumber,txHash,logIndex,vaultId,vault,smartCol,smartDebt' > "$OUT"
+          echo 'blockNumberHex,txHash,logIndexHex,vaultIdHex,vault,smartCol,smartDebt' > "$OUT"
           : > "$RAW"
 
           latest=$(cast block-number --rpc-url "$PLASMA_RPC_URL")
@@ -64,10 +64,10 @@ jobs:
 
           jq -r '
             [
-              (.blockNumber | tonumber),
+              .blockNumber,
               .transactionHash,
-              (.logIndex | tonumber),
-              (.data | tonumber),
+              .logIndex,
+              .data,
               ("0x" + (.topics[1][-40:])),
               ("0x" + (.topics[2][-40:])),
               ("0x" + (.topics[3][-40:]))
