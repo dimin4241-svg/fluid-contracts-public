@@ -77,22 +77,18 @@ jobs:
           {
             echo 'fork_block=23118263'
             echo -n 'registry_count=' && cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block 23118263 --rpc-url "$ETH_RPC_URL"
-            echo -n 'registry_AAVE_join=' && cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'join(bytes32)(address)' 0x414156452d410000000000000000000000000000000000000000000000000000 --block 23118263 --rpc-url "$ETH_RPC_URL"
-            echo -n 'AAVE_join_live=' && cast call 0x24e459F61cEAa7b1cE70Dbaea938940A7c5aD46e 'live()(uint256)' --block 23118263 --rpc-url "$ETH_RPC_URL"
-            echo -n 'AAVE_join_vat=' && cast call 0x24e459F61cEAa7b1cE70Dbaea938940A7c5aD46e 'vat()(address)' --block 23118263 --rpc-url "$ETH_RPC_URL"
-            echo -n 'AAVE_join_ilk=' && cast call 0x24e459F61cEAa7b1cE70Dbaea938940A7c5aD46e 'ilk()(bytes32)' --block 23118263 --rpc-url "$ETH_RPC_URL"
             echo -n 'cleanup_spell_done=' && cast call 0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5 'done()(bool)' --block 23118263 --rpc-url "$ETH_RPC_URL"
             echo -n 'cleanup_spell_eta=' && cast call 0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5 'eta()(uint256)' --block 23118263 --rpc-url "$ETH_RPC_URL"
           } 2>&1 | tee evidence-sky-ilk-registry-race/historical-preconditions.log
 
-      - name: Run differential real-spell fork proof
+      - name: Run real-target scan and differential spell proof
         shell: bash
         working-directory: sky-poc
         run: |
           set -o pipefail
           forge test \
-            --match-path src/IlkRegistryReAdd.t.sol \
-            --match-contract IlkRegistryRemovalRaceTest \
+            --match-path src/IlkRegistryTargetScan.t.sol \
+            --match-test testFindRealPermissionlessPreRemoveAndCorruptRealSpell \
             -vvvv 2>&1 | tee ../evidence-sky-ilk-registry-race/forge-test.log
 
       - name: Extract proof summary
@@ -102,7 +98,7 @@ jobs:
           {
             cat evidence-sky-ilk-registry-race/rpc-selection.log 2>/dev/null || true
             cat evidence-sky-ilk-registry-race/historical-preconditions.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|Victim|count|ghost|AAVE)' evidence-sky-ilk-registry-race/forge-test.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|pre-removable|victim|count|ghost|none of the)' evidence-sky-ilk-registry-race/forge-test.log 2>/dev/null || true
           } | tee evidence-sky-ilk-registry-race/summary.log
 
       - name: Upload evidence
