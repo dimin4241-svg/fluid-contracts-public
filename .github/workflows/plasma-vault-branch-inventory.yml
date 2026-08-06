@@ -21,11 +21,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install requests eth-utils
+      - run: pip install requests eth-utils 'eth-hash[pycryptodome]'
       - name: Query live Plasma vault state
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p automation
-          python scripts/security/inventory_plasma_vault_branches.py | tee automation/plasma-vault-branch-inventory.json
+          python -u scripts/security/inventory_plasma_vault_branches.py | tee automation/plasma-vault-branch-inventory.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
