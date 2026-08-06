@@ -18,7 +18,8 @@ jobs:
     timeout-minutes: 20
     env:
       PLASMA_RPC_URL: https://rpc.plasma.to
-      PLASMA_FORK_BLOCK: 12386164
+      PLASMA_FORK_BLOCK: 29082579
+      CLAIMED_FORK_BLOCK: 12386164
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,6 +27,16 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+      - name: Record claimed-block absence
+        shell: bash
+        run: |
+          mkdir -p evidence-plasma-vault-t4-exact-state
+          {
+            echo "claimed_block=$CLAIMED_FORK_BLOCK"
+            echo "vault_code=$(cast code 0x6E0Cdb5c21B3c8E340E9C9210057035bAfA86ffF --rpc-url \"$PLASMA_RPC_URL\" --block \"$CLAIMED_FORK_BLOCK\")"
+            echo "dex_code=$(cast code 0xbd5dD095d9a6565C8222bb36B5814953F1C46f71 --rpc-url \"$PLASMA_RPC_URL\" --block \"$CLAIMED_FORK_BLOCK\")"
+            echo "tested_live_block=$PLASMA_FORK_BLOCK"
+          } | tee evidence-plasma-vault-t4-exact-state/claimed-vs-live.txt
       - name: Prepare isolated probe
         shell: bash
         run: |
@@ -33,7 +44,7 @@ jobs:
           mkdir -p audit/t4-exact-state/test audit/t4-exact-state/lib evidence-plasma-vault-t4-exact-state
           cp test/security/PlasmaVaultT4ExactStateProbe.t.sol audit/t4-exact-state/test/
           cp -R lib/forge-std audit/t4-exact-state/lib/forge-std
-      - name: Run exact pinned-state probe
+      - name: Run exact recorded-live-state probe
         shell: bash
         run: |
           set -o pipefail
