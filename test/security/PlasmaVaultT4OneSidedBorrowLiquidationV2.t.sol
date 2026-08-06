@@ -28,19 +28,27 @@ interface IOracleFeasibleV3 {
     function getExchangeRateLiquidate() external view returns (uint256);
 }
 
+interface IReserveFeasibleV3 {
+    function isRebalancer(address) external view returns (bool);
+    function rebalanceDexVault(address, uint256, int256, int256, int256, int256) external payable;
+}
+
 contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test is Test {
     address constant FACTORY = 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d;
     address constant VAULT = 0x6E0cDB09eb33cD3894C905E0DFF9289b95a86FFF;
     address constant ORACLE = 0x029E6fF2173ff6c9e61787Fa7A3cfF1117D957b6;
+    address constant RESERVE = 0x28d69059A480d6e0e75f28814024191087ACC466;
     address constant GHO = 0xb77E872A68C62CfC0dFb02C067Ecc3DA23B4bbf3;
     address constant USDT0 = 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb;
     address constant BORROWER = 0x111111111111111111111111111111111111B077;
+    address constant OUTSIDER = 0x222222222222222222222222222222222222BEEF;
 
     uint256 constant COL_GHO = 2_000_000e18;
     uint256 constant COL_USDT0 = 2_000_000e6;
 
     bytes4 constant LIQ_RESULT = bytes4(keccak256("FluidLiquidateResult(uint256,uint256)"));
     bytes4 constant VAULT_ERROR = bytes4(keccak256("FluidVaultError(uint256)"));
+    bytes4 constant RESERVE_ERROR = bytes4(keccak256("FluidReserveContractError(uint256)"));
 
     string rpcUrl;
     uint256 forkBlock;
@@ -52,6 +60,18 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test is Test {
         uint256 debt;
         uint256 errorId;
     }
+
+    event RebalanceAuth(
+        address configuredVaultRebalancer,
+        bool outsiderListedAtReserve,
+        bytes4 directVaultSelector,
+        uint256 directVaultErrorId,
+        bytes4 reserveSelector,
+        uint256 reserveErrorId,
+        bool configuredCallerSucceeded,
+        bytes4 configuredCallerSelector,
+        uint256 configuredCallerErrorId
+    );
 
     event FeasibleCase(
         bool indexed borrowGho,
@@ -104,6 +124,7 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test is Test {
         assertEq(block.chainid, 9745);
         assertEq(block.number, forkBlock);
         assertGt(VAULT.code.length, 0);
+        assertGt(RESERVE.code.length, 0);
     }
 
     function _selector(bytes memory data) internal pure returns (bytes4 value) {
@@ -152,6 +173,49 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test is Test {
         } else if (result.selector == VAULT_ERROR && data.length >= 36) {
             result.errorId = _word(data, 0);
         }
+    }
+
+    function _proveRebalanceAuth() internal {
+        address configured = address(uint160(uint256(vm.load(VAULT, bytes32(uint256(9))))));
+        assertEq(configured, RESERVE, "unexpected vault rebalancer");
+        bool outsiderListed = IReserveFeasibleV3(RESERVE).isRebalancer(OUTSIDER);
+        assertFalse(outsiderListed, "outsider is reserve rebalancer");
+
+        vm.prank(OUTSIDER);
+        (bool directOk, bytes memory directReason) = VAULT.call(
+            abi.encodeWithSignature("rebalance(int256,int256,int256,int256)", int256(0), int256(0), int256(0), int256(0))
+        );
+        assertFalse(directOk, "outsider direct vault rebalance succeeded");
+        assertEq(_selector(directReason), VAULT_ERROR, "wrong direct vault selector");
+        assertEq(_errorId(directReason), 31010, "wrong direct vault auth error");
+
+        vm.prank(OUTSIDER);
+        (bool reserveOk, bytes memory reserveReason) = RESERVE.call(
+            abi.encodeCall(IReserveFeasibleV3.rebalanceDexVault, (VAULT, 0, 0, 0, 0, 0))
+        );
+        assertFalse(reserveOk, "outsider reserve rebalance succeeded");
+        assertEq(_selector(reserveReason), RESERVE_ERROR, "wrong reserve selector");
+        assertEq(_errorId(reserveReason), 90001, "wrong reserve auth error");
+
+        vm.prank(configured);
+        (bool configuredOk, bytes memory configuredReason) = VAULT.call(
+            abi.encodeWithSignature("rebalance(int256,int256,int256,int256)", int256(0), int256(0), int256(0), int256(0))
+        );
+        bytes4 configuredSelector = configuredOk ? bytes4(0) : _selector(configuredReason);
+        uint256 configuredErrorId = configuredOk ? 0 : _errorId(configuredReason);
+        assertTrue(configuredOk || configuredSelector != VAULT_ERROR || configuredErrorId != 31010, "configured rebalancer rejected");
+
+        emit RebalanceAuth(
+            configured,
+            outsiderListed,
+            _selector(directReason),
+            _errorId(directReason),
+            _selector(reserveReason),
+            _errorId(reserveReason),
+            configuredOk,
+            configuredSelector,
+            configuredErrorId
+        );
     }
 
     function executeFeasibleCase(bool borrowGho, uint256 requestedAmount1e18) external {
@@ -234,6 +298,8 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test is Test {
     }
 
     function test_feasibleOneSidedBorrowLiquidation() public {
+        _proveRebalanceAuth();
+
         uint256[4] memory sizes = [
             uint256(100_000e18),
             uint256(500_000e18),
