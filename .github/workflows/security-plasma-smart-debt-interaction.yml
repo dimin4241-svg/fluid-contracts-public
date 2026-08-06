@@ -1,0 +1,68 @@
+name: Security Plasma Smart Debt close interaction
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - 'test/security/PlasmaSmartDebtCloseInteraction.t.sol'
+      - '.github/workflows/security-plasma-smart-debt-interaction.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smart-debt-interaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PLASMA_RPC_URL: 'https://rpc.plasma.to'
+      PLASMA_FORK_BLOCK: '12386164'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Record pinned deployed state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-smart-debt
+          {
+            echo "fork_block=${PLASMA_FORK_BLOCK}"
+            echo "chain_id=$(cast chain-id --rpc-url "${PLASMA_RPC_URL}")"
+            echo "vault=0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF"
+            echo "dex=0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71"
+            echo "vault_code=$(cast code 0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF --block "${PLASMA_FORK_BLOCK}" --rpc-url "${PLASMA_RPC_URL}" | wc -c)"
+            echo "dex_code=$(cast code 0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71 --block "${PLASMA_FORK_BLOCK}" --rpc-url "${PLASMA_RPC_URL}" | wc -c)"
+          } | tee evidence-smart-debt/deployed-state.txt
+
+      - name: Run three-control deployed-fork matrix
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --via-ir \
+            --match-path test/security/PlasmaSmartDebtCloseInteraction.t.sol \
+            -vvvv 2>&1 | tee evidence-smart-debt/full.log
+
+      - name: Extract numerical evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E 'DeploymentProof\(|BaselineClose\(|InteractionProof\(|MaximumResidual\(|Suite result|Failing tests|Compiler run failed|Error:' \
+            evidence-smart-debt/full.log \
+            | tee evidence-smart-debt/summary.log || true
+
+      - name: Upload Smart Debt evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-smart-debt-close-interaction
+          path: evidence-smart-debt/
+          if-no-files-found: error
+          retention-days: 30
