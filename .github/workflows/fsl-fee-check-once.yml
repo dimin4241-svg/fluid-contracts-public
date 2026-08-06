@@ -1,0 +1,45 @@
+name: fSL feeOrReward one-shot check
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/fsl-fee-check-once.yml'
+      - 'scripts/security/check_fsl_fee_or_reward.py'
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests
+      - name: Run all 21 exact checks and preserve output
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py > artifacts/fsl_fee_or_reward_latest.json
+          code=$?
+          set -e
+          echo "checker_exit_code=$code" >> "$GITHUB_STEP_SUMMARY"
+          cat artifacts/fsl_fee_or_reward_latest.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit result
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add artifacts/fsl_fee_or_reward_latest.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'Record fSL feeOrReward on-chain check'
+          git push origin HEAD:audit/read-only-dex-fees-20260805
