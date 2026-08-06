@@ -1,4 +1,4 @@
-name: Security Sky IlkRegistry mass re-add
+name: Security Sky current mainnet mass re-add
 
 on:
   push:
@@ -29,76 +29,51 @@ jobs:
         with:
           version: stable
 
-      - name: Select stable archive-capable Ethereum RPC
+      - name: Select stable Ethereum RPC
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence-sky-ilk-registry-race
+          mkdir -p evidence-sky-ilk-registry-current
           endpoints=(
             'https://eth.drpc.org'
             'https://rpc.payload.de'
             'https://eth-mainnet.public.blastapi.io'
             'https://mainnet.gateway.tenderly.co'
             'https://ethereum-rpc.publicnode.com'
-            'https://1rpc.io/eth'
           )
           for rpc in "${endpoints[@]}"; do
-            echo "Testing $rpc" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
-            stable=1
-            for attempt in 1 2; do
-              if ! output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block 23118263 --rpc-url "$rpc" 2>&1); then
-                stable=0
-                echo "attempt=$attempt failed: $output" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
-                break
-              fi
-              echo "attempt=$attempt output=$output" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
-              if ! [[ "$output" =~ ^[0-9]+ ]]; then stable=0; break; fi
-            done
-            if [[ "$stable" == 1 ]]; then
+            if output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
               echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
-              echo "Selected $rpc" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
+              echo "selected=$rpc current_registry_count=$output" | tee evidence-sky-ilk-registry-current/rpc.log
               exit 0
             fi
           done
-          echo 'No stable archive-capable RPC endpoint succeeded' | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
           exit 1
 
-      - name: Record exact historical preconditions
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo 'fork_block=23118263'
-            echo -n 'registry_count=' && cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block 23118263 --rpc-url "$ETH_RPC_URL"
-            echo -n 'cleanup_spell_done=' && cast call 0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5 'done()(bool)' --block 23118263 --rpc-url "$ETH_RPC_URL"
-            echo -n 'cleanup_spell_eta=' && cast call 0x26009aFf7fE39bF7611d66E0D38CAc43b3A93CD5 'eta()(uint256)' --block 23118263 --rpc-url "$ETH_RPC_URL"
-          } 2>&1 | tee evidence-sky-ilk-registry-race/historical-preconditions.log
-
-      - name: Run mass re-add proof against real spell
+      - name: Run current-mainnet one-transaction proof
         shell: bash
         working-directory: sky-poc
         run: |
           set -o pipefail
           forge test \
-            --match-path src/IlkRegistryMassReAdd.t.sol \
-            --match-test testAttackerMassReAddsGovernanceRemovedIlks \
-            -vvvv 2>&1 | tee ../evidence-sky-ilk-registry-race/forge-test.log
+            --match-path src/IlkRegistryCurrentMassReAdd.t.sol \
+            --match-test testCurrentMainnetOneTransactionRestoresRemovedIlks \
+            -vvvv 2>&1 | tee ../evidence-sky-ilk-registry-current/forge-test.log
 
       - name: Extract proof summary
         if: always()
         shell: bash
         run: |
           {
-            cat evidence-sky-ilk-registry-race/rpc-selection.log 2>/dev/null || true
-            cat evidence-sky-ilk-registry-race/historical-preconditions.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|re-added ilk|governance removals reversed|adapters still live|cleaned count|post-attack count)' evidence-sky-ilk-registry-race/forge-test.log 2>/dev/null || true
-          } | tee evidence-sky-ilk-registry-race/summary.log
+            cat evidence-sky-ilk-registry-current/rpc.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|fork block|initial registry count|restored in one transaction|post-attack registry count|gas used|nonzero Art)' evidence-sky-ilk-registry-current/forge-test.log 2>/dev/null || true
+          } | tee evidence-sky-ilk-registry-current/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-ilk-registry-mass-readd
-          path: evidence-sky-ilk-registry-race/
+          name: sky-current-mainnet-mass-readd
+          path: evidence-sky-ilk-registry-current/
           if-no-files-found: error
           retention-days: 30
