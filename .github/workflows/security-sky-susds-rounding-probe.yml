@@ -1,0 +1,105 @@
+name: Security Sky sUSDS rounding probe
+
+on:
+  push:
+    branches: [audit/sky-ilk-registry-race-runner-20260806]
+    paths: ['.github/workflows/security-sky-susds-rounding-probe.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch verified source and run arithmetic search
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 - <<'PY'
+          import json, urllib.request, pathlib, random
+          addr='0x4e7991e5C547ce825BdEb665EE14a3274f9F61e0'
+          urls=[
+            f'https://sourcify.dev/server/v2/contract/1/{addr}?fields=all',
+            f'https://sourcify.dev/server/files/any/1/{addr}',
+          ]
+          for i,u in enumerate(urls):
+            try:
+              data=urllib.request.urlopen(u,timeout=30).read()
+              pathlib.Path(f'evidence/source-api-{i}.json').write_bytes(data)
+            except Exception as e:
+              pathlib.Path(f'evidence/source-api-{i}.error.txt').write_text(repr(e))
+
+          RAY=10**27
+          def rmul_nearest(x,y):
+            return (x*y + RAY//2)//RAY
+          def rpow(x,n):
+            if x==0: return RAY if n==0 else 0
+            z=RAY if n%2==0 else x
+            n//=2
+            while n:
+              x=rmul_nearest(x,x)
+              if n%2: z=rmul_nearest(z,x)
+              n//=2
+            return z
+          def drip_once(chi,ssr,dt):
+            return rpow(ssr,dt)*chi//RAY
+          def divup(x,y): return 0 if x==0 else (x-1)//y+1
+
+          # Cadence: sequential one-second calls vs a single N-second call.
+          rates=[RAY,1000000000627937192491029810,1000000001547125957863212448,1000000002732676825177582095]
+          horizons=[1,2,10,100,1000,10000,86400,604800,31536000]
+          cadence=[]
+          max_abs=0
+          for ssr in rates:
+            for n in horizons:
+              one=drip_once(RAY,ssr,n)
+              seq=RAY
+              for _ in range(n): seq=drip_once(seq,ssr,1)
+              d=seq-one
+              cadence.append({'ssr':ssr,'seconds':n,'single':one,'sequential':seq,'delta_chi':d})
+              max_abs=max(max_abs,abs(d))
+          pathlib.Path('evidence/cadence.json').write_text(json.dumps(cadence,indent=2))
+
+          # Fixed-chi same-transaction round trips. A cycle must not return more assets than paid.
+          violations=[]
+          chis=[RAY,RAY+1,10**27+10**18,11*10**26,2*RAY,10*RAY]
+          values=list(range(1,500))+[10**6,10**12,10**18,10**24]
+          for chi in chis:
+            for assets in values:
+              shares=assets*RAY//chi                    # deposit
+              redeemed=shares*chi//RAY                 # redeem all
+              if redeemed>assets:
+                violations.append(('deposit-redeem',chi,assets,shares,redeemed))
+              if shares:
+                need=divup(shares*chi,RAY)              # mint
+                out=shares*chi//RAY                     # redeem
+                if out>need:
+                  violations.append(('mint-redeem',chi,need,shares,out))
+              burn=divup(assets*RAY,chi)                # withdraw assets
+              paid=divup(burn*chi,RAY)                  # assets needed to mint burned shares
+              if assets>paid:
+                violations.append(('mint-withdraw',chi,assets,burn,paid))
+          pathlib.Path('evidence/roundtrip-violations.json').write_text(json.dumps(violations,indent=2))
+
+          # Upper bound of cadence error translated to USDS at 10bn shares.
+          supply=10_000_000_000*10**18
+          cadence_wei=supply*max_abs//RAY
+          summary={
+            'roundtrip_violations':len(violations),
+            'max_abs_delta_chi':max_abs,
+            'max_cadence_delta_usds_wei_at_10bn_shares':cadence_wei,
+            'max_cadence_delta_usds':cadence_wei/1e18,
+          }
+          pathlib.Path('evidence/summary.json').write_text(json.dumps(summary,indent=2))
+          print(json.dumps(summary,indent=2))
+          if violations: raise SystemExit('profitable fixed-chi roundtrip found')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sky-susds-rounding-probe
+          path: evidence/
+          retention-days: 30
