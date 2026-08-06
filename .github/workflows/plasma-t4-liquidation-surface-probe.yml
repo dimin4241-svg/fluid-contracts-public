@@ -1,0 +1,61 @@
+name: Plasma T4 liquidation surface probe
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-exact-debt-controls-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol'
+      - 'test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol'
+      - '.github/workflows/plasma-t4-liquidation-surface-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  liquidation-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated liquidation probe
+        shell: bash
+        run: |
+          rm -rf audit/t4-liquidation-probe
+          mkdir -p audit/t4-liquidation-probe/test audit/t4-liquidation-probe/lib evidence-liquidation
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/t4-liquidation-probe/test/
+          cp test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol audit/t4-liquidation-probe/test/
+          cp -R lib/forge-std audit/t4-liquidation-probe/lib/forge-std
+      - name: Run pinned liquidation surface probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/t4-liquidation-probe --via-ir \
+            --match-contract PlasmaVaultT4LiquidationSurfaceProbeTest \
+            --match-test test_liquidationSurfaceUnderPureDexPerturb -vvvv 2>&1 \
+            | tee evidence-liquidation/liquidation.log
+      - name: Extract liquidation evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(LiquidationProbeSurface|LiquidationSimulation|LiquidationPerturbControl|LiquidationInteraction)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-liquidation/liquidation.log | tee evidence-liquidation/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-liquidation/block.txt
+          git rev-parse HEAD > evidence-liquidation/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-liquidation-surface-probe
+          path: evidence-liquidation/
+          if-no-files-found: error
+          retention-days: 30
