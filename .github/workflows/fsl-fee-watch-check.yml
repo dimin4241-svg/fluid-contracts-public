@@ -1,0 +1,36 @@
+name: fSL feeOrReward one-shot check
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/fsl-fee-watch-check.yml'
+      - 'scripts/security/check_fsl_fee_or_reward.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests
+      - name: Check all fSL contracts
+        shell: bash
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py > fsl-result.json
+          rc=$?
+          cat fsl-result.json
+          echo "checker_exit_code=$rc" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fsl-result
+          path: fsl-result.json
+          retention-days: 1
