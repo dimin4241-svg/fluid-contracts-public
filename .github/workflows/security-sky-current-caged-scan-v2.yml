@@ -1,0 +1,72 @@
+name: Security Sky current Registry mutation scan
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-current-caged-scan-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Run scan with RPC failover
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence-sky-current-mutation-scan
+          endpoints=(
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://mainnet.gateway.tenderly.co'
+            'https://eth-mainnet.public.blastapi.io'
+            'https://rpc.payload.de'
+          )
+          passed=0
+          for rpc in "${endpoints[@]}"; do
+            log=../evidence-sky-current-mutation-scan/forge-test.log
+            set +e
+            ETH_RPC_URL="$rpc" forge test \
+              --match-path src/IlkRegistryCurrentCagedScan.t.sol \
+              -vvvv > "$log" 2>&1
+            rc=$?
+            set -e
+            cat "$log"
+            if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
+              echo "CASE_PASS current-caged-scan rpc=$rpc" | tee ../evidence-sky-current-mutation-scan/summary.log
+              passed=1
+              break
+            fi
+          done
+          [[ $passed -eq 1 ]]
+          grep -E '(snapshot block|registry count|publicly removable|PASS|Suite result)' "$log" \
+            | tee ../evidence-sky-current-mutation-scan/key-results.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-current-registry-mutation-scan
+          path: evidence-sky-current-mutation-scan/
+          if-no-files-found: error
+          retention-days: 30
