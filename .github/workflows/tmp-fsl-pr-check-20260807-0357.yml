@@ -1,0 +1,113 @@
+name: Temporary fSL PR check 20260807-0357
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event.pull_request.number == 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Check all 21 exact canonical Routescan URLs
+        shell: bash
+        run: |
+          python - <<'PY'
+          import concurrent.futures, datetime, json, requests, time
+
+          SELECTOR='0xe47a882d'
+          TARGETS=[
+            ('Base',8453,'0x4563134183e45D9502015db14B263E31781099bB','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB'),
+            ('Base',8453,'0x983107BB3dcb71f3A30176114D8a17c454A62514','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514'),
+            ('Base',8453,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),
+            ('Base',8453,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+            ('Plasma',9745,'0x983107BB3dcb71f3A30176114D8a17c454A62514','https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514'),
+            ('Plasma',9745,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+            ('Polygon',137,'0xa779B6736385930145F4856226Cd3E3691B72458','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xa779B6736385930145F4856226Cd3E3691B72458'),
+            ('Polygon',137,'0x4563134183e45D9502015db14B263E31781099bB','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB'),
+            ('Polygon',137,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),
+            ('Polygon',137,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+            ('Arbitrum',42161,'0x82C53239c4CFC89A8E55A691422af24c18A944b1','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x82C53239c4CFC89A8E55A691422af24c18A944b1'),
+            ('Arbitrum',42161,'0x1F0bFd9862ae58208d26db0d80797974434EC013','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x1F0bFd9862ae58208d26db0d80797974434EC013'),
+            ('Arbitrum',42161,'0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E'),
+            ('Ethereum',1,'0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1'),
+            ('Ethereum',1,'0x9b1f75ea07723F331996831f6d04AD4900d1A3B3','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x9b1f75ea07723F331996831f6d04AD4900d1A3B3'),
+            ('Ethereum',1,'0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF'),
+            ('Ethereum',1,'0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2'),
+            ('Ethereum',1,'0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f'),
+            ('Ethereum',1,'0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6'),
+            ('Ethereum',1,'0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70'),
+            ('Ethereum',1,'0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c'),
+          ]
+          RPCS={
+            1:['https://ethereum-rpc.publicnode.com','https://eth.llamarpc.com','https://rpc.ankr.com/eth'],
+            8453:['https://base-rpc.publicnode.com','https://mainnet.base.org'],
+            137:['https://polygon-bor-rpc.publicnode.com','https://polygon-rpc.com'],
+            42161:['https://arbitrum-one-rpc.publicnode.com','https://arb1.arbitrum.io/rpc'],
+            9745:['https://rpc.plasma.to','https://plasma-rpc.publicnode.com','https://plasma.drpc.org'],
+          }
+          def dec32(x):
+              v=int(x,16)&0xffffffff
+              return v-(1<<32) if v&0x80000000 else v
+          def rpc_call(url,address):
+              p={'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':address,'data':SELECTOR},'latest']}
+              r=requests.post(url,json=p,timeout=25,headers={'User-Agent':'fluid-fsl-automation/20260807'})
+              r.raise_for_status(); b=r.json(); res=b.get('result') if isinstance(b,dict) else None
+              if not isinstance(res,str) or not res.startswith('0x'): raise RuntimeError(str(b))
+              return res
+          def one(t):
+              network,chain,address,url=t
+              row={'network':network,'chain_id':chain,'address':address,'url':url,'routescan_attempts':[],'fallback_attempts':[]}
+              result=None; source=None
+              for a in range(3):
+                  try:
+                      r=requests.get(url,timeout=25,headers={'User-Agent':'fluid-fsl-automation/20260807'})
+                      b=r.json() if r.content else None
+                      row['routescan_attempts'].append({'attempt':a+1,'status':r.status_code,'body':b})
+                      r.raise_for_status(); res=b.get('result') if isinstance(b,dict) else None
+                      if isinstance(res,str) and res.startswith('0x'):
+                          result=res; source='routescan'; break
+                  except Exception as e:
+                      row['routescan_attempts'].append({'attempt':a+1,'error':repr(e)})
+                  time.sleep(a+1)
+              if result is None:
+                  for rpc in RPCS[chain]:
+                      try:
+                          result=rpc_call(rpc,address); source=rpc
+                          row['fallback_attempts'].append({'rpc':rpc,'result':result}); break
+                      except Exception as e:
+                          row['fallback_attempts'].append({'rpc':rpc,'error':repr(e)})
+              if result is None:
+                  row['error']='No confirmed eth_call result'; return row
+              raw=dec32(result)
+              row.update({'source':source,'result':result,'raw_int32':raw,'annual_percent':raw/10000})
+              if raw!=0:
+                  conf=[]; ok=False
+                  for rpc in RPCS[chain]:
+                      if rpc==source: continue
+                      try:
+                          r2=rpc_call(rpc,address); raw2=dec32(r2); match=(r2.lower()==result.lower() and raw2==raw)
+                          conf.append({'rpc':rpc,'result':r2,'raw_int32':raw2,'match':match})
+                          if match: ok=True; break
+                      except Exception as e: conf.append({'rpc':rpc,'error':repr(e)})
+                  row['independent_confirmations']=conf; row['nonzero_confirmed']=ok
+                  if not ok: row['error']='Nonzero not independently confirmed'
+              return row
+          with concurrent.futures.ThreadPoolExecutor(max_workers=21) as ex:
+              rows=list(ex.map(one,TARGETS))
+          now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+          failures=[r for r in rows if 'error' in r]
+          nonzero=[r for r in rows if r.get('raw_int32') not in (None,0) and r.get('nonzero_confirmed') is True and 'error' not in r]
+          out={'checked_at_utc':now,'target_count':21,'success_count':21-len(failures),'failure_count':len(failures),'nonzero':nonzero,'results':rows,'failures':failures}
+          print('FSL_RESULT_JSON='+json.dumps(out,separators=(',',':')))
+          if failures: raise SystemExit(2)
+          PY
