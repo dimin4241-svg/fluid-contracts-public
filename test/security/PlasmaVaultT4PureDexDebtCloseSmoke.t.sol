@@ -39,7 +39,7 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeTest is Test {
     address internal constant RESOLVER = 0xA5C3E16523eeeDDcC34706b0E6bE88b4c6EA95cC;
     address internal constant DEX = 0x080574D224E960c272e005aA03EFbe793f317640;
     address internal constant LIQUIDITY = 0x607F4C5BB672230e8672085532f7e901544a7375;
-    address internal constant GHO = 0xb77E0268e0f6f2E57B4a0869567B83b9Ca79C7A4;
+    address internal constant GHO = 0xb77E0268e0f6F2e57B4a0869567b83B9Ca79c7a4;
     address internal constant USDT0 = 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb;
 
     uint256 internal constant TARGET_NFT = 2770;
