@@ -1,0 +1,33 @@
+name: Plasma vault branch inventory
+
+on:
+  push:
+    branches: [audit/absorb-gas-dos]
+    paths:
+      - 'scripts/security/inventory_plasma_vault_branches.py'
+      - '.github/workflows/plasma-vault-branch-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/absorb-gas-dos
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests eth-utils
+      - name: Query live Plasma vault state
+        run: |
+          mkdir -p automation
+          python scripts/security/inventory_plasma_vault_branches.py | tee automation/plasma-vault-branch-inventory.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plasma-vault-branch-inventory
+          path: automation/plasma-vault-branch-inventory.json
