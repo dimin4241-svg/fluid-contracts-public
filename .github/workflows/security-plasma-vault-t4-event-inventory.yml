@@ -14,7 +14,7 @@ permissions:
 jobs:
   inventory:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       PLASMA_RPC_URL: https://rpc.plasma.to
       VAULT_FACTORY: '0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d'
@@ -39,14 +39,30 @@ jobs:
 
           latest=$(cast block-number --rpc-url "$PLASMA_RPC_URL")
           topic0=$(cast keccak 'VaultT4Deployed(address,uint256,address,address)')
-          chunk=500000
+
+          # Find the first block where the factory has code. This avoids scanning
+          # the entire Plasma history while respecting the RPC's 10,000-block cap.
+          low=0
+          high=$latest
+          while ((low < high)); do
+            mid=$(((low + high) / 2))
+            code=$(cast code "$VAULT_FACTORY" --block "$mid" --rpc-url "$PLASMA_RPC_URL")
+            if [[ "$code" == "0x" ]]; then
+              low=$((mid + 1))
+            else
+              high=$mid
+            fi
+          done
+          factory_birth=$low
+          chunk=10000
 
           echo "chainId=$(cast chain-id --rpc-url "$PLASMA_RPC_URL")" | tee "$SUMMARY"
           echo "latestBlock=$latest" | tee -a "$SUMMARY"
           echo "factory=$VAULT_FACTORY" | tee -a "$SUMMARY"
+          echo "factoryBirthBlock=$factory_birth" | tee -a "$SUMMARY"
           echo "topic0=$topic0" | tee -a "$SUMMARY"
 
-          for ((from=0; from<=latest; from+=chunk)); do
+          for ((from=factory_birth; from<=latest; from+=chunk)); do
             to=$((from + chunk - 1))
             if ((to > latest)); then to=$latest; fi
             from_hex=$(printf '0x%x' "$from")
