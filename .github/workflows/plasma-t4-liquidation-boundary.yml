@@ -1,0 +1,61 @@
+name: Plasma T4 liquidation boundary
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-liquidation-20260806
+    paths:
+      - '.github/workflows/plasma-t4-liquidation-boundary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated boundary probe
+        shell: bash
+        run: |
+          rm -rf audit/liquidation-boundary
+          mkdir -p audit/liquidation-boundary/test audit/liquidation-boundary/lib evidence-boundary
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/liquidation-boundary/test/
+          cp test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol audit/liquidation-boundary/test/
+          cp test/security/PlasmaVaultT4LargeLiquidationReachabilityV2.t.sol audit/liquidation-boundary/test/
+          cp test/security/PlasmaVaultT4LiquidationBoundary.t.sol audit/liquidation-boundary/test/
+          cp -R lib/forge-std audit/liquidation-boundary/lib/forge-std
+      - name: Run boundary probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/liquidation-boundary --via-ir \
+            --match-contract PlasmaVaultT4LiquidationBoundaryTest \
+            --match-test test_adverseDirectionLiquidityBoundary -vvvv 2>&1 \
+            | tee evidence-boundary/boundary.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(BoundaryReachability|LargeV2Flow|LargeV2Oracle|LargeV2Liquidation|LargeV2VaultStorage|LargeV2DexStorage)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-boundary/boundary.log | tee evidence-boundary/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-boundary/block.txt
+          git rev-parse HEAD > evidence-boundary/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-liquidation-boundary
+          path: evidence-boundary/
+          if-no-files-found: error
+          retention-days: 30
