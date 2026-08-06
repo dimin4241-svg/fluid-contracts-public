@@ -1,0 +1,66 @@
+name: Security Ethena handler live inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-ethena-handler-live-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    env:
+      RPC_URL: 'https://ethereum-rpc.publicnode.com'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query handlers
+        shell: bash
+        run: |
+          set -u
+          mkdir -p evidence-ethena-handler-inventory
+          handlers=(
+            0x4acF39b8A63C744ce37594234eBebF5F99DfC710
+            0xf4f24CDD9A9929Ce262735253BADB03F959D208f
+            0xca91be2077Aad98A8B7ce82a665024c2Fd7e74Be
+            0xa7C805988f04f0e841504761E5aa8387600e430b
+            0x36639DAd77eC858574aaF07a68bBa62b7db19FfA
+            0x7607968F40d7Ac4Ef39E809F29fADDe34C00A0A6
+            0xafE3974f4916140a093F1de7Fc064A3Da220DD41
+          )
+          {
+            echo "block=$(cast block-number --rpc-url "$RPC_URL")"
+            for h in "${handlers[@]}"; do
+              echo "=== $h ==="
+              echo "code_bytes=$(( (${#$(cast code "$h" --rpc-url "$RPC_URL")} - 2) / 2 ))" 2>/dev/null || true
+              for sig in \
+                'RESERVE_CONTRACT()(address)' \
+                'LIQUIDITY()(address)' \
+                'SUSDE()(address)' \
+                'VAULT()(address)' \
+                'VAULT2()(address)' \
+                'BORROW_TOKEN()(address)' \
+                'RATE_PERCENT_MARGIN()(uint256)' \
+                'MAX_REWARDS_DELAY()(uint256)' \
+                'UTILIZATION_PENALTY_START()(uint256)' \
+                'UTILIZATION100_PENALTY_PERCENT()(uint256)' \
+                'currentMagnifier()(uint256)' \
+                'calculateMagnifier()(uint256)' \
+                'getSUSDEYieldRate()(uint256)'; do
+                printf '%s=' "$sig"
+                cast call "$h" "$sig" --rpc-url "$RPC_URL" 2>&1 || true
+              done
+            done
+          } | tee evidence-ethena-handler-inventory/inventory.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ethena-handler-live-inventory
+          path: evidence-ethena-handler-inventory/
+          retention-days: 30
