@@ -1,0 +1,68 @@
+name: Security Sky StarGuard payload shape
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-starguard-payload-shape.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Inspect payload code and mutable proxy slots
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          endpoints=(
+            'https://ethereum-rpc.publicnode.com'
+            'https://mainnet.gateway.tenderly.co'
+            'https://eth.drpc.org'
+          )
+          rpc=''
+          for x in "${endpoints[@]}"; do cast block-number --rpc-url "$x" >/dev/null 2>&1 && { rpc="$x"; break; }; done
+          test -n "$rpc" || exit 1
+
+          SPARK=0xcc7529473B850103524905D3914470898aDe8747
+          GROVE=0xa21dBD7de71833a8F22437E30AfD6A4d4A75122C
+          SKYBASE=0xd3e498e1008B3a04E0e13152880F9A9cC07D2cb5
+          EIP1967_IMPL=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
+          EIP1967_BEACON=0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50
+          EIP1967_ADMIN=0xb53127684a568b3173ae13b9f8a6016e019d9b4771a717850b5d6103e8fa8f3
+
+          {
+            echo "block=$(cast block-number --rpc-url "$rpc")"
+            for p in $SPARK $GROVE $SKYBASE; do
+              code=$(cast code $p --rpc-url "$rpc" 2>/dev/null || echo 0x)
+              bytes=$(( (${#code}-2)/2 ))
+              hash=$(cast codehash $p --rpc-url "$rpc" 2>/dev/null || true)
+              echo "payload=$p bytes=$bytes codehash=$hash"
+              echo -n '  eip1967.impl='; cast storage $p $EIP1967_IMPL --rpc-url "$rpc" 2>/dev/null || true
+              echo -n '  eip1967.beacon='; cast storage $p $EIP1967_BEACON --rpc-url "$rpc" 2>/dev/null || true
+              echo -n '  eip1967.admin='; cast storage $p $EIP1967_ADMIN --rpc-url "$rpc" 2>/dev/null || true
+              echo -n '  slot0='; cast storage $p 0 --rpc-url "$rpc" 2>/dev/null || true
+              echo -n '  isExecutable='; cast call $p 'isExecutable()(bool)' --rpc-url "$rpc" 2>&1 || true
+              echo -n '  implementation()='; cast call $p 'implementation()(address)' --rpc-url "$rpc" 2>&1 || true
+              echo -n '  owner()='; cast call $p 'owner()(address)' --rpc-url "$rpc" 2>&1 || true
+              echo -n '  admin()='; cast call $p 'admin()(address)' --rpc-url "$rpc" 2>&1 || true
+            done
+          } | tee evidence/payload-shape.txt
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-starguard-payload-shape
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
