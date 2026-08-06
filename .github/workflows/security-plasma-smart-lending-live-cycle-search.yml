@@ -1,0 +1,62 @@
+name: Security Plasma SmartLending live cycle search
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - 'test/security/PlasmaSmartLendingLiveCycleSearch.t.sol'
+      - '.github/workflows/security-plasma-smart-lending-live-cycle-search.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-cycle-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - name: Checkout search branch
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Run exact-output cycle grid on live wrapper pools
+        shell: bash
+        run: |
+          mkdir -p evidence-smart-lending-live-cycle
+          set -o pipefail
+          forge test \
+            --via-ir \
+            --match-path test/security/PlasmaSmartLendingLiveCycleSearch.t.sol \
+            -vvvv 2>&1 | tee evidence-smart-lending-live-cycle/live-cycle.log
+
+      - name: Extract evidence summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(LivePoolMetadata|CycleResult)\(|Suite result|Failing tests|Error:" \
+            evidence-smart-lending-live-cycle/live-cycle.log \
+            | tee evidence-smart-lending-live-cycle/live-cycle-summary.log || true
+
+      - name: Upload cycle-search evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-smart-lending-live-cycle-search
+          path: evidence-smart-lending-live-cycle/
+          if-no-files-found: error
+          retention-days: 30
