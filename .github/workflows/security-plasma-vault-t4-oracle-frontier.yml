@@ -1,0 +1,69 @@
+name: Security Plasma Vault T4 oracle frontier
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-oracle-drift-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4OracleFrontier.t.sol'
+      - '.github/workflows/security-plasma-vault-t4-oracle-frontier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-frontier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated frontier harness
+        shell: bash
+        run: |
+          rm -rf audit/t4-oracle-frontier-poc
+          mkdir -p audit/t4-oracle-frontier-poc/test audit/t4-oracle-frontier-poc/lib evidence-plasma-vault-t4-oracle-frontier
+          cp test/security/PlasmaVaultT4OracleFrontier.t.sol audit/t4-oracle-frontier-poc/test/
+          cp -R lib/forge-std audit/t4-oracle-frontier-poc/lib/forge-std
+
+      - name: Measure oracle frontier and round-trip cost
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/t4-oracle-frontier-poc \
+            --via-ir \
+            --match-path test/PlasmaVaultT4OracleFrontier.t.sol \
+            -vvvv 2>&1 | tee evidence-plasma-vault-t4-oracle-frontier/frontier.log
+
+      - name: Extract frontier evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(MarketState|FrontierResult)\(|Suite result|Failing tests|Error:|Compiler run failed" \
+            evidence-plasma-vault-t4-oracle-frontier/frontier.log \
+            | tee evidence-plasma-vault-t4-oracle-frontier/summary.log || true
+
+      - name: Upload frontier evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-oracle-frontier
+          path: evidence-plasma-vault-t4-oracle-frontier/
+          if-no-files-found: error
+          retention-days: 30
