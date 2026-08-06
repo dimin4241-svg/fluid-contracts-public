@@ -1,0 +1,64 @@
+name: Security Spark Rewards Optimism inventory
+
+on:
+  push:
+    branches: [audit/sky-ilk-registry-race-runner-20260806]
+    paths: ['.github/workflows/security-spark-rewards-optimism-inventory.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query live contract
+        shell: bash
+        run: |
+          set -u
+          mkdir -p evidence
+          rpc=https://mainnet.optimism.io
+          R=0xf94473Bf6EF648638A7b1eEef354fE440721ef41
+          DEFAULT=0x0000000000000000000000000000000000000000000000000000000000000000
+          EPOCH=$(cast keccak EPOCH_ROLE)
+          ROOT=$(cast keccak MERKLE_ROOT_ROLE)
+          q() { echo -n "$1 "; shift; cast call "$@" --rpc-url "$rpc" 2>&1 || true; }
+          {
+            echo rpc=$rpc
+            echo -n chain=; cast chain-id --rpc-url "$rpc" || true
+            echo -n block=; cast block-number --rpc-url "$rpc" || true
+            code=$(cast code $R --rpc-url "$rpc" 2>/dev/null || echo 0x); echo codebytes=$(((${#code}-2)/2))
+            q wallet $R 'wallet()(address)'
+            q root $R 'merkleRoot()(bytes32)'
+            W=$(cast call $R 'wallet()(address)' --rpc-url "$rpc" 2>/dev/null || echo 0x0)
+            echo wallet=$W
+            wc=$(cast code $W --rpc-url "$rpc" 2>/dev/null || echo 0x); echo walletCodeBytes=$(((${#wc}-2)/2))
+            cast call $W 'masterCopy()(address)' --rpc-url "$rpc" 2>/dev/null || true
+            cast call $W 'getThreshold()(uint256)' --rpc-url "$rpc" 2>/dev/null || true
+            for role in $DEFAULT $EPOCH $ROOT; do
+              n=$(cast call $R 'getRoleMemberCount(bytes32)(uint256)' $role --rpc-url "$rpc" 2>/dev/null || echo 0)
+              echo "role=$role count=$n"
+              for ((i=0;i<n;i++)); do
+                a=$(cast call $R 'getRoleMember(bytes32,uint256)(address)' $role $i --rpc-url "$rpc" 2>/dev/null || true)
+                echo member=$a
+                c=$(cast code $a --rpc-url "$rpc" 2>/dev/null || echo 0x); echo codebytes=$(((${#c}-2)/2))
+                cast call $a 'masterCopy()(address)' --rpc-url "$rpc" 2>/dev/null || true
+                cast call $a 'getThreshold()(uint256)' --rpc-url "$rpc" 2>/dev/null || true
+              done
+            done
+            echo '=== recent logs ==='
+            latest=$(cast block-number --rpc-url "$rpc")
+            start=$((latest-2000000))
+            cast logs --from-block $start --to-block latest --address $R --rpc-url "$rpc" 2>&1 | tail -n 400 || true
+          } | tee evidence/inventory.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spark-rewards-optimism-inventory
+          path: evidence/
+          retention-days: 30
