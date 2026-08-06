@@ -106,7 +106,7 @@ jobs:
             echo; echo '=== CALLBACK / DELEGATECALL ==='; cat evidence/callback-delegatecall-lines.txt
           } > evidence/summary.txt
 
-          tar -czf evidence/pau-source.tgz -C target src README.md foundry.toml remappings.txt
+          tar -czf evidence/pau-source.tgz -C target src README.md foundry.toml
 
       - name: Upload evidence
         uses: actions/upload-artifact@v4
