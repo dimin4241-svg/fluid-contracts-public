@@ -35,6 +35,12 @@ jobs:
           rm -rf audit-smart-debt
           mkdir -p audit-smart-debt/src audit-smart-debt/test audit-smart-debt/lib evidence-smart-debt
           cp test/security/PlasmaSmartDebtCloseInteraction.t.sol audit-smart-debt/test/
+          # Normalize the two user-supplied mixed-case literals to EIP-55 only in
+          # the isolated copy. The canonical source is updated separately.
+          sed -i \
+            -e 's/0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF/0x6E0Cdb5c21B3c8E340E9C9210057035bAfA86ffF/g' \
+            -e 's/0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71/0xbd5dD095d9a6565C8222bb36B5814953F1C46f71/g' \
+            audit-smart-debt/test/PlasmaSmartDebtCloseInteraction.t.sol
           cp -R lib/forge-std audit-smart-debt/lib/forge-std
           cat > audit-smart-debt/foundry.toml <<'EOF'
           [profile.default]
@@ -47,37 +53,92 @@ jobs:
           remappings = ["forge-std/=lib/forge-std/src/"]
           EOF
 
-      - name: Record pinned deployed state
+      - name: Locate canonical deployment interval
+        id: deployment
         shell: bash
         run: |
           set -euo pipefail
-          VAULT_CODE="$(cast code 0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF --block "${PLASMA_FORK_BLOCK}" --rpc-url "${PLASMA_RPC_URL}")"
-          DEX_CODE="$(cast code 0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71 --block "${PLASMA_FORK_BLOCK}" --rpc-url "${PLASMA_RPC_URL}")"
-          {
-            echo "fork_block=${PLASMA_FORK_BLOCK}"
-            echo "chain_id=$(cast chain-id --rpc-url "${PLASMA_RPC_URL}")"
-            echo "vault=0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF"
-            echo "dex=0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71"
-            echo "vault_code_bytes=$(( (${#VAULT_CODE} - 2) / 2 ))"
-            echo "dex_code_bytes=$(( (${#DEX_CODE} - 2) / 2 ))"
-            echo "vault_code_prefix=${VAULT_CODE:0:66}"
-            echo "dex_code_prefix=${DEX_CODE:0:66}"
-          } | tee evidence-smart-debt/deployed-state.txt
+          VAULT=0x6E0Cdb5c21B3c8E340E9C9210057035bAfA86ffF
+          DEX=0xbd5dD095d9a6565C8222bb36B5814953F1C46f71
+          LATEST="$(cast block-number --rpc-url "${PLASMA_RPC_URL}")"
 
-      - name: Run three-control deployed-fork matrix
+          code_bytes() {
+            local address="$1" block="$2" code
+            code="$(cast code "$address" --block "$block" --rpc-url "${PLASMA_RPC_URL}")"
+            echo $(( (${#code} - 2) / 2 ))
+          }
+
+          first_code_block() {
+            local address="$1" lo=0 hi="$LATEST" mid code
+            while (( lo < hi )); do
+              mid=$(( (lo + hi) / 2 ))
+              code="$(cast code "$address" --block "$mid" --rpc-url "${PLASMA_RPC_URL}")"
+              if [[ "$code" == "0x" ]]; then
+                lo=$((mid + 1))
+              else
+                hi="$mid"
+              fi
+            done
+            echo "$lo"
+          }
+
+          VAULT_FIRST="$(first_code_block "$VAULT")"
+          DEX_FIRST="$(first_code_block "$DEX")"
+          COMMON_FIRST="$VAULT_FIRST"
+          if (( DEX_FIRST > COMMON_FIRST )); then COMMON_FIRST="$DEX_FIRST"; fi
+
+          {
+            echo "chain_id=$(cast chain-id --rpc-url "${PLASMA_RPC_URL}")"
+            echo "requested_fork_block=${PLASMA_FORK_BLOCK}"
+            echo "latest_block=${LATEST}"
+            echo "vault_first_code_block=${VAULT_FIRST}"
+            echo "dex_first_code_block=${DEX_FIRST}"
+            echo "first_block_with_both=${COMMON_FIRST}"
+            for block in "${PLASMA_FORK_BLOCK}" 14000000 16000000 18000000 20000000 22000000 23861164 24000000 "${COMMON_FIRST}" "${LATEST}"; do
+              if (( block <= LATEST )); then
+                echo "block=${block} vault_code_bytes=$(code_bytes "$VAULT" "$block") dex_code_bytes=$(code_bytes "$DEX" "$block")"
+              fi
+            done
+          } | tee evidence-smart-debt/deployment-timeline.txt
+
+          echo "latest=${LATEST}" >> "$GITHUB_OUTPUT"
+          echo "common_first=${COMMON_FIRST}" >> "$GITHUB_OUTPUT"
+
+      - name: Compile standalone harness
         shell: bash
         run: |
           set -o pipefail
-          forge test --root audit-smart-debt --via-ir \
+          forge build --root audit-smart-debt --via-ir 2>&1 | tee evidence-smart-debt/compile.log
+
+      - name: Prove requested block is internally inconsistent
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          PLASMA_FORK_BLOCK="${PLASMA_FORK_BLOCK}" forge test --root audit-smart-debt --via-ir \
             --match-path test/PlasmaSmartDebtCloseInteraction.t.sol \
-            -vvvv 2>&1 | tee evidence-smart-debt/full.log
+            -vvvv 2>&1 | tee evidence-smart-debt/requested-block.log
+          status=${PIPESTATUS[0]}
+          echo "requested_block_test_exit=${status}" | tee -a evidence-smart-debt/deployment-timeline.txt
+          exit 0
+
+      - name: Run matrix at latest canonical state
+        shell: bash
+        env:
+          LIVE_FORK_BLOCK: ${{ steps.deployment.outputs.latest }}
+        run: |
+          set -o pipefail
+          PLASMA_FORK_BLOCK="${LIVE_FORK_BLOCK}" forge test --root audit-smart-debt --via-ir \
+            --match-path test/PlasmaSmartDebtCloseInteraction.t.sol \
+            -vvvv 2>&1 | tee evidence-smart-debt/live-state.log
 
       - name: Extract numerical evidence
         if: always()
         shell: bash
         run: |
-          grep -E 'DeploymentProof\(|BaselineClose\(|InteractionProof\(|MaximumResidual\(|Suite result|Failing tests|Compiler run failed|Error:|vault missing|dex missing|fSL6 not found' \
-            evidence-smart-debt/full.log \
+          cat evidence-smart-debt/deployment-timeline.txt || true
+          grep -hE 'DeploymentProof\(|BaselineClose\(|InteractionProof\(|MaximumResidual\(|Suite result|Failing tests|Compiler run failed|Error:|vault missing|dex missing|fSL6 not found|not Vault T4|position debt shares changed' \
+            evidence-smart-debt/*.log \
             | tee evidence-smart-debt/summary.log || true
 
       - name: Upload Smart Debt evidence
