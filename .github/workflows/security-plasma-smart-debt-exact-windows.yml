@@ -7,13 +7,19 @@ on:
     paths:
       - 'test/security/PlasmaSmartDebtExactCloseInteraction.t.sol'
       - '.github/workflows/security-plasma-smart-debt-exact-windows.yml'
+  pull_request:
+    branches:
+      - audit/plasma-smart-debt-exact-12386164
+    paths:
+      - 'test/security/PlasmaSmartDebtExactCloseInteraction.t.sol'
+      - '.github/workflows/security-plasma-smart-debt-exact-windows.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: plasma-smart-debt-exact-windows
+  group: plasma-smart-debt-exact-windows-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
