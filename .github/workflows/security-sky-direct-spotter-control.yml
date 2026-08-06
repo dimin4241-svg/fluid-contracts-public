@@ -29,39 +29,47 @@ jobs:
         with:
           version: stable
 
-      - name: Run direct Spotter differential control with RPC failover
+      - name: Run focused direct Spotter control with RPC failover
         shell: bash
         working-directory: sky-poc
         run: |
           set -euo pipefail
           mkdir -p ../evidence-sky-direct-spotter-control
           endpoints=(
+            'https://mainnet.gateway.tenderly.co'
             'https://ethereum-rpc.publicnode.com'
             'https://eth.drpc.org'
-            'https://mainnet.gateway.tenderly.co'
             'https://eth-mainnet.public.blastapi.io'
             'https://rpc.payload.de'
           )
           forge build 2>&1 | tee ../evidence-sky-direct-spotter-control/forge-build.log
           passed=0
+          : > ../evidence-sky-direct-spotter-control/all-attempts.log
           for rpc in "${endpoints[@]}"; do
-            log=../evidence-sky-direct-spotter-control/forge-test.log
+            safe=$(echo "$rpc" | tr '/:.' '_')
+            log="../evidence-sky-direct-spotter-control/${safe}.log"
             set +e
-            ETH_RPC_URL="$rpc" forge test \
-              --match-path src/IlkRegistryDirectSpotterControl.t.sol \
-              --match-test testDirectSpotterPokeProducesSameVatSpotStateWithoutRegistryReAdd \
+            ETH_RPC_URL="$rpc" forge test --threads 1 \
+              --match-path src/IlkRegistryDirectSpotterSingleControl.t.sol \
+              --match-test testDirectPublicSpotterPokeMatchesRegistryOmegaLinkSpotResult \
               -vvvv > "$log" 2>&1
             rc=$?
             set -e
-            cat "$log"
+            {
+              echo "=== rpc=$rpc rc=$rc ==="
+              cat "$log"
+            } | tee -a ../evidence-sky-direct-spotter-control/all-attempts.log
             if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
+              cp "$log" ../evidence-sky-direct-spotter-control/forge-test.log
               echo "CASE_PASS direct-spotter-causality-control rpc=$rpc" | tee ../evidence-sky-direct-spotter-control/summary.log
               passed=1
               break
             fi
+            sleep 2
           done
           [[ $passed -eq 1 ]]
-          grep -E '(direct public Spotter changes|Registry plus Omega changes|different final values|Registry count|PASS|Suite result)' "$log" \
+          grep -E '(LINK-A baseline|direct public Spotter result|Registry plus Omega result|final values equal|PASS|Suite result)' \
+            ../evidence-sky-direct-spotter-control/forge-test.log \
             | tee ../evidence-sky-direct-spotter-control/key-results.log
 
       - name: Upload evidence
