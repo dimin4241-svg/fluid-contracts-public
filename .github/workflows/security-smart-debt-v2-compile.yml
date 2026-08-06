@@ -1,0 +1,53 @@
+name: Security Smart Debt V2 compile
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - 'test/security/SmartDebtCloseInteractionV2.t.sol'
+      - '.github/workflows/security-smart-debt-v2-compile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Compile isolated harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf audit-smart-debt-v2
+          mkdir -p audit-smart-debt-v2/src audit-smart-debt-v2/test audit-smart-debt-v2/lib evidence-smart-debt-v2
+          cp test/security/SmartDebtCloseInteractionV2.t.sol audit-smart-debt-v2/test/
+          cp -R lib/forge-std audit-smart-debt-v2/lib/forge-std
+          cat > audit-smart-debt-v2/foundry.toml <<'EOF'
+          [profile.default]
+          src = "src"
+          test = "test"
+          libs = ["lib"]
+          solc_version = "0.8.21"
+          optimizer = true
+          optimizer_runs = 200
+          remappings = ["forge-std/=lib/forge-std/src/"]
+          EOF
+          set -o pipefail
+          forge build --root audit-smart-debt-v2 --via-ir 2>&1 | tee evidence-smart-debt-v2/compile.log
+      - name: Upload compile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-debt-v2-compile
+          path: evidence-smart-debt-v2/
+          if-no-files-found: error
+          retention-days: 30
