@@ -16,22 +16,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Query official Fluid Plasma endpoints
+      - name: Query and extract official Fluid Plasma endpoints
         shell: bash
         run: |
-          set -u
+          set -euo pipefail
           mkdir -p evidence-plasma-api
           query() {
             local name="$1" url="$2"
-            echo "=== ${name}: ${url} ===" | tee -a evidence-plasma-api/status.txt
+            echo "=== ${name}: ${url} ==="
             code="$(curl -L --silent --show-error --connect-timeout 10 --max-time 45 \
               -H 'accept: application/json' \
               -o "evidence-plasma-api/${name}.json" \
-              -w '%{http_code}' "$url" || echo CURL_ERROR)"
+              -w '%{http_code}' "$url" || true)"
             bytes="$(wc -c < "evidence-plasma-api/${name}.json" 2>/dev/null || echo 0)"
-            echo "http=${code} bytes=${bytes}" | tee -a evidence-plasma-api/status.txt
-            head -c 500 "evidence-plasma-api/${name}.json" 2>/dev/null | tee -a evidence-plasma-api/status.txt || true
-            echo | tee -a evidence-plasma-api/status.txt
+            echo "http=${code:-CURL_ERROR} bytes=${bytes}"
+            head -c 300 "evidence-plasma-api/${name}.json" 2>/dev/null || true
+            echo
           }
 
           query dexes_v2 https://api.fluid.instadapp.io/v2/9745/dexes
@@ -41,43 +41,32 @@ jobs:
           query dexes_chain_query 'https://api.fluid.instadapp.io/v2/dexes?chainId=9745'
           query vaults_chain_query 'https://api.fluid.instadapp.io/v2/vaults?chainId=9745'
 
-      - name: Extract DEX id 6 and USDC-USDT candidates
-        shell: bash
-        run: |
-          python3 - <<'PY' | tee evidence-plasma-api/extracted.txt
+          python3 - <<'PY'
           import json, pathlib, re
           root = pathlib.Path('evidence-plasma-api')
           for p in sorted(root.glob('*.json')):
-              print(f'=== {p.name} ===')
+              print(f'=== EXTRACT {p.name} ===')
               raw = p.read_text(errors='replace')
               try:
                   obj = json.loads(raw)
               except Exception as exc:
                   print('not_json', exc, raw[:300])
                   continue
-              print('top_type', type(obj).__name__)
               def walk(x, path='$'):
                   if isinstance(x, dict):
-                      text = json.dumps(x, sort_keys=True)
+                      text = json.dumps(x, sort_keys=True, separators=(',', ':'))
                       low = text.lower()
-                      if ('usdc' in low and ('usdt' in low or 'usdt0' in low)) or any(
-                          str(x.get(k, '')) == '6' for k in ('id','dexId','dex_id','poolId','pool_id')
-                      ):
-                          print(path, text[:3000])
+                      ids = ('id','dexId','dex_id','poolId','pool_id','vaultId','vault_id')
+                      exact_id = any(str(x.get(k, '')) == '6' for k in ids)
+                      target_pair = 'usdc' in low and ('usdt0' in low or 'usdt' in low)
+                      target_type = str(x.get('vaultType', x.get('vault_type', ''))) == '4'
+                      if exact_id or target_pair or target_type:
+                          print(path, text[:5000])
                       for k,v in x.items(): walk(v, f'{path}.{k}')
                   elif isinstance(x, list):
                       for i,v in enumerate(x): walk(v, f'{path}[{i}]')
               walk(obj)
-              addrs = sorted(set(re.findall(r'0x[a-fA-F0-9]{40}', raw)))
-              print('addresses', len(addrs))
-              print('\n'.join(addrs[:100]))
+              print('ALL_ADDRESSES')
+              for addr in sorted(set(re.findall(r'0x[a-fA-F0-9]{40}', raw))):
+                  print(addr)
           PY
-
-      - name: Upload API evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: plasma-api-address-recovery
-          path: evidence-plasma-api/
-          if-no-files-found: error
-          retention-days: 30
