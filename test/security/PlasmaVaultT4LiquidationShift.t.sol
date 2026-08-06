@@ -34,6 +34,8 @@ interface IResolverLiquidationShift {
         bool absorbAvailable;
     }
 
+    function FACTORY() external view returns (address);
+
     function getVaultLiquidation(address vault, uint256 tokenInAmt)
         external returns (LiquidationData memory);
 }
@@ -41,7 +43,7 @@ interface IResolverLiquidationShift {
 contract PlasmaVaultT4LiquidationShiftTest is Test {
     address internal constant FACTORY = 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d;
     address internal constant VAULT = 0x6E0cDB09eb33cD3894C905E0DFF9289b95a86FFF;
-    address internal constant RESOLVER = 0x2795717571d0a03B5c8b5962FcAE2682B92D3A9a;
+    address internal constant RESOLVER = 0xA5C3E16523eeeDDcC34706b0E6bE88b4c6EA95cC;
     address internal constant GHO = 0xb77E872A68C62CfC0dFb02C067Ecc3DA23B4bbf3;
     address internal constant USDT0 = 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb;
     uint256 internal constant MANIPULATOR_NFT = 2887;
@@ -82,6 +84,7 @@ contract PlasmaVaultT4LiquidationShiftTest is Test {
         vm.createSelectFork(rpcUrl, forkBlock);
         assertEq(block.chainid, 9745, "unexpected chain");
         assertGt(RESOLVER.code.length, 0, "missing resolver");
+        assertEq(IResolverLiquidationShift(RESOLVER).FACTORY(), FACTORY, "resolver factory mismatch");
     }
 
     function _approve(address token, address spender) internal {
