@@ -2,8 +2,47 @@
 pragma solidity 0.8.21;
 
 import {Test} from "forge-std/Test.sol";
-import {IFluidVault} from "../../contracts/protocols/vault/interfaces/iVault.sol";
-import {IFluidVaultT4} from "../../contracts/protocols/vault/interfaces/iVaultT4.sol";
+
+interface IFluidVaultProbe {
+    struct Tokens {
+        address token0;
+        address token1;
+    }
+
+    struct ConstantViews {
+        address liquidity;
+        address factory;
+        address operateImplementation;
+        address adminImplementation;
+        address secondaryImplementation;
+        address deployer;
+        address supply;
+        address borrow;
+        Tokens supplyToken;
+        Tokens borrowToken;
+        uint256 vaultId;
+        uint256 vaultType;
+        bytes32 supplyExchangePriceSlot;
+        bytes32 borrowExchangePriceSlot;
+        bytes32 userSupplySlot;
+        bytes32 userBorrowSlot;
+    }
+
+    function constantsView() external view returns (ConstantViews memory constantsView_);
+}
+
+interface IFluidVaultT4Probe {
+    function operatePerfect(
+        uint256 nftId,
+        int256 perfectColShares,
+        int256 colToken0MinMax,
+        int256 colToken1MinMax,
+        int256 perfectDebtShares,
+        int256 debtToken0MinMax,
+        int256 debtToken1MinMax,
+        address to
+    ) external payable returns (uint256 nftIdResult, int256[] memory results);
+}
 
 interface IERC20SmartDebtProbe {
     function balanceOf(address account) external view returns (uint256);
@@ -33,8 +72,8 @@ contract PlasmaSmartDebtCloseInteractionTest is Test {
     address internal constant VAULT = 0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF;
     address internal constant DEX = 0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71;
 
-    // The two deployed Plasma fSL contracts present in the live Fluid registry.
-    // The test selects fSL6 by requiring fSL.DEX() == the pinned DEX address.
+    // Deployed Plasma fSL candidates from the live Fluid registry. The test
+    // selects fSL6 only when its immutable DEX address equals the pinned DEX.
     address internal constant FSL_CANDIDATE_A = 0x983107BB3dcb71f3A30176114D8a17c454A62514;
     address internal constant FSL_CANDIDATE_B = 0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A;
 
@@ -58,8 +97,6 @@ contract PlasmaSmartDebtCloseInteractionTest is Test {
         uint256 estimateBefore1;
         uint256 estimateAfter0;
         uint256 estimateAfter1;
-        uint256 combinedCost0;
-        uint256 combinedCost1;
         int256 expectedDelta0;
         int256 expectedDelta1;
         int256 actualDelta0;
@@ -121,7 +158,7 @@ contract PlasmaSmartDebtCloseInteractionTest is Test {
         assertGt(VAULT.code.length, 0, "vault missing");
         assertGt(DEX.code.length, 0, "dex missing");
 
-        IFluidVault.ConstantViews memory c = IFluidVault(VAULT).constantsView();
+        IFluidVaultProbe.ConstantViews memory c = IFluidVaultProbe(VAULT).constantsView();
         assertEq(c.borrow, DEX, "vault is not connected to pinned DEX");
         assertEq(c.vaultType, 4, "not Vault T4");
 
@@ -182,8 +219,9 @@ contract PlasmaSmartDebtCloseInteractionTest is Test {
                 baseEstimatorResidual1
             );
 
-            // Baseline Vault close and direct DEX estimator should agree exactly or differ
-            // only by the final per-token integer rounding boundary.
+            // The Vault full-close path delegates the same debt shares to the
+            // DEX perfect-payback path. Any larger gap means the control itself
+            // is wrong and the interaction result must not be trusted.
             assertLe(_abs(baseEstimatorResidual0), 2, "baseline token0 estimator mismatch");
             assertLe(_abs(baseEstimatorResidual1), 2, "baseline token1 estimator mismatch");
 
@@ -210,8 +248,6 @@ contract PlasmaSmartDebtCloseInteractionTest is Test {
                     s.estimateBefore1 = estimateBefore1;
                     s.estimateAfter0 = estimateAfter0;
                     s.estimateAfter1 = estimateAfter1;
-                    s.combinedCost0 = combined.token0Cost;
-                    s.combinedCost1 = combined.token1Cost;
                     s.expectedDelta0 = int256(estimateAfter0) - int256(estimateBefore0);
                     s.expectedDelta1 = int256(estimateAfter1) - int256(estimateBefore1);
                     s.actualDelta0 = int256(combined.token0Cost) - int256(baseline.token0Cost);
@@ -291,7 +327,7 @@ contract PlasmaSmartDebtCloseInteractionTest is Test {
         uint256 before0 = IERC20SmartDebtProbe(token0).balanceOf(owner);
         uint256 before1 = IERC20SmartDebtProbe(token1).balanceOf(owner);
 
-        (, int256[] memory r) = IFluidVaultT4(VAULT).operatePerfect(
+        (, int256[] memory r) = IFluidVaultT4Probe(VAULT).operatePerfect(
             nftId,
             0,
             0,
