@@ -1,0 +1,70 @@
+name: Security Plasma SmartLending share interaction
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - 'test/security/PlasmaSmartLendingShareInteraction.t.sol'
+      - '.github/workflows/security-plasma-smart-lending-share-interaction.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  share-interaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - name: Checkout probe branch
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated share-interaction harness
+        shell: bash
+        run: |
+          rm -rf audit/share-interaction-poc
+          mkdir -p audit/share-interaction-poc/test audit/share-interaction-poc/lib evidence-smart-lending-share-interaction
+          cp test/security/PlasmaSmartLendingShareInteraction.t.sol audit/share-interaction-poc/test/
+          cp -R lib/forge-std audit/share-interaction-poc/lib/forge-std
+
+      - name: Run three-control share interaction probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/share-interaction-poc \
+            --via-ir \
+            --match-path test/PlasmaSmartLendingShareInteraction.t.sol \
+            -vvvv 2>&1 | tee evidence-smart-lending-share-interaction/share-interaction.log
+
+      - name: Extract evidence summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(ProbeMetadata|ScenarioResult|InteractionResult)\(|Suite result|Failing tests|Error:" \
+            evidence-smart-lending-share-interaction/share-interaction.log \
+            | tee evidence-smart-lending-share-interaction/share-interaction-summary.log || true
+
+      - name: Upload share-interaction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-smart-lending-share-interaction
+          path: evidence-smart-lending-share-interaction/
+          if-no-files-found: error
+          retention-days: 30
