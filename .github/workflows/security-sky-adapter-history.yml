@@ -1,0 +1,86 @@
+name: Security Sky historical adapter map
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-adapter-history.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  adapter-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout complete Sky spell archive
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/spells-mainnet
+          ref: master
+          path: spells-mainnet
+          fetch-depth: 1
+
+      - name: Build historical Join-address map
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-sky-adapter-history
+          python3 - <<'PY' | tee evidence-sky-adapter-history/join-map.txt
+          from pathlib import Path
+          import re
+          from collections import defaultdict
+
+          roots = [Path('spells-mainnet')]
+          patterns = [
+              re.compile(r'address(?:\s+(?:public|internal|private))?\s+constant\s+([A-Z0-9_]*JOIN[A-Z0-9_]*)\s*=\s*(0x[0-9a-fA-F]{40})'),
+              re.compile(r'([A-Z0-9_]*JOIN[A-Z0-9_]*)\s*=\s*(0x[0-9a-fA-F]{40})'),
+          ]
+          found = defaultdict(lambda: defaultdict(set))
+          for root in roots:
+              for p in root.rglob('*.sol'):
+                  try:
+                      text = p.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  for lineno, line in enumerate(text.splitlines(), 1):
+                      for pattern in patterns:
+                          for name, addr in pattern.findall(line):
+                              if 'JOIN' not in name:
+                                  continue
+                              found[name][addr.lower()].add(f'{p}:{lineno}')
+
+          print('=== SYMBOLS WITH MULTIPLE DISTINCT HISTORICAL ADDRESSES ===')
+          multi = 0
+          for name in sorted(found):
+              if len(found[name]) <= 1:
+                  continue
+              multi += 1
+              print(f'\n{name} distinct={len(found[name])}')
+              for addr, locs in sorted(found[name].items()):
+                  print(f'  {addr}')
+                  for loc in sorted(locs)[:8]:
+                      print(f'    {loc}')
+          print(f'\nMULTI_SYMBOL_COUNT={multi}')
+
+          print('\n=== ALL UNIQUE MCD_JOIN SYMBOLS ===')
+          all_addrs = set()
+          for name in sorted(found):
+              if not name.startswith('MCD_JOIN_'):
+                  continue
+              addrs = sorted(found[name])
+              all_addrs.update(addrs)
+              print(name, ','.join(addrs))
+          print(f'UNIQUE_JOIN_ADDRESS_COUNT={len(all_addrs)}')
+          PY
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-historical-adapter-map
+          path: evidence-sky-adapter-history/
+          if-no-files-found: error
+          retention-days: 30
