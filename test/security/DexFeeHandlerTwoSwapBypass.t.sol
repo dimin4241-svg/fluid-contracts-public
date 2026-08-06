@@ -55,7 +55,8 @@ contract DexFeeHandlerTwoSwapBypassTest is Test {
     address internal constant DEX = 0xf063BD202E45d6b2843102cb4EcE339026645D4a;
     address internal constant HANDLER = 0x49EF1B3230a8d2AC7205E808dF5859f1b94D61Df;
     address internal constant RESERVE = 0x264786EF916af64a1DB19F513F24a3681734ce92;
-    address internal constant REBALANCER = 0x4F6F977aCDD1177DCD81aB83074855EcB9C2D49e;
+    // Observed successfully calling rebalance() on the live wstETH/ETH fee handler.
+    address internal constant REBALANCER = 0xb287f8A01a9538656c72Fa6aE1EE0117A187Be0C;
     address internal constant USDE = 0x4c9EDD5852cd905f086C759E8383e09bff1E68B3;
     address internal constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
 
