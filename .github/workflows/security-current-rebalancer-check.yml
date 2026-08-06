@@ -1,0 +1,44 @@
+name: Security current Reserve rebalancer check
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-current-rebalancer-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      RPC_URL: 'https://ethereum-rpc.publicnode.com'
+      RESERVE: '0x264786EF916af64a1DB19F513F24a3681734ce92'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Check observed keepers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-current-rebalancers
+          {
+            echo "block=$(cast block-number --rpc-url "$RPC_URL")"
+            for a in \
+              0x70FfF8874e46b928d5d100512743e312a7025feA \
+              0x0Ed35B1609Ec45c7079E80d11149a52717e4859A \
+              0xb287f8A01a9538656c72Fa6aE1EE0117A187Be0C \
+              0x4F6F977aCDD1177DCD81aB83074855EcB9C2D49e; do
+              echo "$a $(cast call "$RESERVE" 'isRebalancer(address)(bool)' "$a" --rpc-url "$RPC_URL")"
+            done
+          } | tee evidence-current-rebalancers/current.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-reserve-rebalancers
+          path: evidence-current-rebalancers/
+          retention-days: 30
