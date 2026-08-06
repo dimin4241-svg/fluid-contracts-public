@@ -1,0 +1,82 @@
+name: Security Spark PSM3 live seeding
+
+on:
+  push:
+    branches: [audit/sky-ilk-registry-race-runner-20260806]
+    paths: ['.github/workflows/security-spark-psm3-live-seeding.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: base
+            rpc: https://mainnet.base.org
+            psm: '0x1601843c5E9bC251A3272907010AFa41Fa18347E'
+          - name: arbitrum
+            rpc: https://arb1.arbitrum.io/rpc
+            psm: '0x2B05F8e1cACC6974fD79A673a341Fe1f58d27266'
+          - name: optimism
+            rpc: https://mainnet.optimism.io
+            psm: '0xe0F9978b907853F354d79188A3dEfbD41978af62'
+          - name: unichain
+            rpc: https://mainnet.unichain.org
+            psm: '0x7b42Ed932f26509465F7cE3FAF76FfCe1275312f'
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query PSM state
+        shell: bash
+        env:
+          RPC: ${{ matrix.rpc }}
+          PSM: ${{ matrix.psm }}
+          NAME: ${{ matrix.name }}
+        run: |
+          set -u
+          mkdir -p evidence
+          q() { echo -n "$1 "; shift; cast call "$@" --rpc-url "$RPC" 2>&1 || true; }
+          {
+            echo network=$NAME
+            echo rpc=$RPC
+            echo -n chainId=; cast chain-id --rpc-url "$RPC" || true
+            echo -n block=; cast block-number --rpc-url "$RPC" || true
+            code=$(cast code $PSM --rpc-url "$RPC" 2>/dev/null || echo 0x); echo codebytes=$(((${#code}-2)/2))
+            q owner $PSM 'owner()(address)'
+            q usdc $PSM 'usdc()(address)'
+            q usds $PSM 'usds()(address)'
+            q susds $PSM 'susds()(address)'
+            q rateProvider $PSM 'rateProvider()(address)'
+            q pocket $PSM 'pocket()(address)'
+            q totalShares $PSM 'totalShares()(uint256)'
+            q totalAssets $PSM 'totalAssets()(uint256)'
+            RP=$(cast call $PSM 'rateProvider()(address)' --rpc-url "$RPC" 2>/dev/null || echo 0x0)
+            q conversionRate $RP 'getConversionRate()(uint256)'
+            for kind in usdc usds susds; do
+              token=$(cast call $PSM "$kind()(address)" --rpc-url "$RPC" 2>/dev/null || echo 0x0)
+              cust=$PSM
+              if [ "$kind" = usdc ]; then cust=$(cast call $PSM 'pocket()(address)' --rpc-url "$RPC" 2>/dev/null || echo $PSM); fi
+              q "$kind-balance" $token 'balanceOf(address)(uint256)' $cust
+              q "$kind-decimals" $token 'decimals()(uint8)'
+            done
+            echo '=== minimum deposits ==='
+            USDC=$(cast call $PSM 'usdc()(address)' --rpc-url "$RPC" 2>/dev/null || echo 0x0)
+            USDS=$(cast call $PSM 'usds()(address)' --rpc-url "$RPC" 2>/dev/null || echo 0x0)
+            SUSDS=$(cast call $PSM 'susds()(address)' --rpc-url "$RPC" 2>/dev/null || echo 0x0)
+            q preview-1-usdc $PSM 'previewDeposit(address,uint256)(uint256)' $USDC 1
+            q preview-1-usds $PSM 'previewDeposit(address,uint256)(uint256)' $USDS 1
+            q preview-1-susds $PSM 'previewDeposit(address,uint256)(uint256)' $SUSDS 1
+          } | tee evidence/${NAME}.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spark-psm3-${{ matrix.name }}
+          path: evidence/
+          retention-days: 30
