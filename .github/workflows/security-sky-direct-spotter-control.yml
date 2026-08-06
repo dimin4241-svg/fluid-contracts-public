@@ -1,4 +1,4 @@
-name: Security Sky direct Spotter causality control
+name: Security Sky direct oracle causality control
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
         with:
           version: stable
 
-      - name: Run focused direct Spotter control with RPC failover
+      - name: Run focused direct oracle causality control with RPC failover
         shell: bash
         working-directory: sky-poc
         run: |
@@ -51,7 +51,7 @@ jobs:
             set +e
             ETH_RPC_URL="$rpc" forge test --threads 1 \
               --match-path src/IlkRegistryDirectSpotterSingleControl.t.sol \
-              --match-test testDirectPublicSpotterPokeMatchesRegistryOmegaLinkSpotResult \
+              --match-test testDirectPublicOracleAndSpotterPathMatchesRegistryOmegaResult \
               -vvvv > "$log" 2>&1
             rc=$?
             set -e
@@ -61,14 +61,14 @@ jobs:
             } | tee -a ../evidence-sky-direct-spotter-control/all-attempts.log
             if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
               cp "$log" ../evidence-sky-direct-spotter-control/forge-test.log
-              echo "CASE_PASS direct-spotter-causality-control rpc=$rpc" | tee ../evidence-sky-direct-spotter-control/summary.log
+              echo "CASE_PASS direct-oracle-causality-control rpc=$rpc" | tee ../evidence-sky-direct-spotter-control/summary.log
               passed=1
               break
             fi
             sleep 2
           done
           [[ $passed -eq 1 ]]
-          grep -E '(LINK-A baseline|direct public Spotter result|Registry plus Omega result|final values equal|PASS|Suite result)' \
+          grep -E '(LINK-A baseline|direct oracle plus Spotter result|Registry plus Omega result|final values equal|PASS|Suite result)' \
             ../evidence-sky-direct-spotter-control/forge-test.log \
             | tee ../evidence-sky-direct-spotter-control/key-results.log
 
