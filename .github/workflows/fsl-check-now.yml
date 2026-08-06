@@ -1,11 +1,12 @@
 name: fSL feeOrReward check
 
 on:
-  push:
+  pull_request:
     branches:
-      - audit/read-only-dex-fees-20260805
+      - main
     paths:
       - .github/workflows/fsl-check-now.yml
+      - scripts/security/check_fsl_fee_or_reward.py
   workflow_dispatch:
 
 permissions:
