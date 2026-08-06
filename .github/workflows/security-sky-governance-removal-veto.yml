@@ -1,0 +1,82 @@
+name: Security Sky governance removal veto
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-governance-removal-veto.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Run governance removal veto proof with RPC failover
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence-sky-governance-removal-veto
+          endpoints=(
+            'https://mainnet.gateway.tenderly.co'
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://eth-mainnet.public.blastapi.io'
+            'https://rpc.payload.de'
+          )
+          forge build 2>&1 | tee ../evidence-sky-governance-removal-veto/forge-build.log
+          passed=0
+          : > ../evidence-sky-governance-removal-veto/all-attempts.log
+          for rpc in "${endpoints[@]}"; do
+            safe=$(echo "$rpc" | tr '/:.' '_')
+            log="../evidence-sky-governance-removal-veto/${safe}.log"
+            set +e
+            ETH_RPC_URL="$rpc" forge test --threads 1 \
+              --match-path src/IlkRegistryGovernanceRemovalVeto.t.sol \
+              --match-test testPublicCallerCanVetoRepeatedGovernanceRemovalCycles \
+              -vvvv > "$log" 2>&1
+            rc=$?
+            set -e
+            {
+              echo "=== rpc=$rpc rc=$rc ==="
+              cat "$log"
+            } | tee -a ../evidence-sky-governance-removal-veto/all-attempts.log
+            if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
+              cp "$log" ../evidence-sky-governance-removal-veto/forge-test.log
+              echo "CASE_PASS governance-removal-veto rpc=$rpc" | tee ../evidence-sky-governance-removal-veto/summary.log
+              passed=1
+              break
+            fi
+            sleep 2
+          done
+          [[ $passed -eq 1 ]]
+          grep -E '(governance removeAuth cycles|successful unprivileged re-adds|final AAVE-A|total attacker add gas|AAVE Join remains|PASS|Suite result)' \
+            ../evidence-sky-governance-removal-veto/forge-test.log \
+            | tee ../evidence-sky-governance-removal-veto/key-results.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-governance-removal-veto
+          path: evidence-sky-governance-removal-veto/
+          if-no-files-found: error
+          retention-days: 30
