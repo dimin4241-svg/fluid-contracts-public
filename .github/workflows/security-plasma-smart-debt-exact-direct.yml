@@ -1,0 +1,60 @@
+name: Security Plasma Smart Debt exact direct runner
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-debt-exact-12386164
+    paths:
+      - 'test/security/PlasmaSmartDebtExactCloseInteraction.t.sol'
+      - '.github/workflows/security-plasma-smart-debt-exact-direct.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-direct:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: '12386164'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Manual checkout without marketplace actions
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+          git submodule update --init --recursive --depth=1
+
+      - name: Install Foundry without marketplace actions
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -L https://foundry.paradigm.xyz | bash
+          export PATH="$HOME/.foundry/bin:$PATH"
+          foundryup
+          echo "$HOME/.foundry/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare isolated exact Smart Debt harness
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf audit/plasma-smart-debt-exact
+          mkdir -p audit/plasma-smart-debt-exact/test audit/plasma-smart-debt-exact/lib
+          cp test/security/PlasmaSmartDebtExactCloseInteraction.t.sol audit/plasma-smart-debt-exact/test/
+          cp -R lib/forge-std audit/plasma-smart-debt-exact/lib/forge-std
+
+      - name: Run exact three-control fork proof
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/plasma-smart-debt-exact \
+            --via-ir \
+            --match-contract PlasmaSmartDebtExactCloseInteractionTest \
+            -vvvv
