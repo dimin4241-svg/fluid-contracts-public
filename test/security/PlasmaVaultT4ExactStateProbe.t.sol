@@ -15,8 +15,8 @@ interface IStorageExactState {
 
 contract PlasmaVaultT4ExactStateProbeTest is Test {
     address internal constant FACTORY = 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d;
-    address internal constant VAULT = 0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF;
-    address internal constant DEX = 0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71;
+    address internal constant VAULT = 0x6E0Cdb5c21B3c8E340E9C9210057035bAfA86ffF;
+    address internal constant DEX = 0xbd5dD095d9a6565C8222bb36B5814953F1C46f71;
 
     uint256 internal constant FACTORY_TOKEN_CONFIG_SLOT = 3;
     uint256 internal constant VAULT_POSITION_DATA_SLOT = 3;
