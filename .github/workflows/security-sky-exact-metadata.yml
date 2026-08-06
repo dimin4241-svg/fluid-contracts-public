@@ -1,4 +1,4 @@
-name: Security Sky operational metadata restoration v2
+name: Security Sky operational metadata restoration v3
 
 on:
   push:
@@ -35,16 +35,25 @@ jobs:
           set -euo pipefail
           mkdir -p evidence-sky-exact-metadata
           endpoints=(
-            'https://eth.drpc.org'
-            'https://rpc.payload.de'
             'https://eth-mainnet.public.blastapi.io'
             'https://mainnet.gateway.tenderly.co'
             'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
           )
           for rpc in "${endpoints[@]}"; do
-            if output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block 23118263 --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
+            stable=1
+            for attempt in 1 2; do
+              if ! output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block 23118263 --rpc-url "$rpc" 2>&1); then
+                stable=0
+                echo "$rpc attempt=$attempt failed: $output" | tee -a evidence-sky-exact-metadata/rpc.log
+                break
+              fi
+              echo "$rpc attempt=$attempt count=$output" | tee -a evidence-sky-exact-metadata/rpc.log
+              [[ "$output" =~ ^[0-9]+ ]] || stable=0
+            done
+            if [[ "$stable" == 1 ]]; then
               echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
-              echo "selected=$rpc historical_registry_count=$output" | tee evidence-sky-exact-metadata/rpc.log
+              echo "selected=$rpc" | tee -a evidence-sky-exact-metadata/rpc.log
               exit 0
             fi
           done
@@ -73,7 +82,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-operational-metadata-restoration-v2
+          name: sky-operational-metadata-restoration-v3
           path: evidence-sky-exact-metadata/
           if-no-files-found: error
           retention-days: 30
