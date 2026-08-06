@@ -1,0 +1,73 @@
+name: Security Fluid address chain locator
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/security-fluid-address-chain-locator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Probe canonical networks
+        shell: bash
+        run: |
+          set -u
+          mkdir -p evidence-chain-locator
+          VAULT=0x6E0Cdb5c21B3c8E340E9C9210057035bAfA86ffF
+          DEX=0xbd5dD095d9a6565C8222bb36B5814953F1C46f71
+
+          probe() {
+            local name="$1" expected_chain="$2" rpc="$3"
+            local chain latest vault_code dex_code vault_bytes dex_bytes
+            echo "=== ${name} ==="
+            chain="$(cast chain-id --rpc-url "$rpc" 2>/dev/null || echo RPC_ERROR)"
+            latest="$(cast block-number --rpc-url "$rpc" 2>/dev/null || echo RPC_ERROR)"
+            vault_code="$(cast code "$VAULT" --rpc-url "$rpc" 2>/dev/null || echo RPC_ERROR)"
+            dex_code="$(cast code "$DEX" --rpc-url "$rpc" 2>/dev/null || echo RPC_ERROR)"
+            if [[ "$vault_code" == 0x* ]]; then vault_bytes=$(( (${#vault_code} - 2) / 2 )); else vault_bytes=-1; fi
+            if [[ "$dex_code" == 0x* ]]; then dex_bytes=$(( (${#dex_code} - 2) / 2 )); else dex_bytes=-1; fi
+            echo "expected_chain=${expected_chain} actual_chain=${chain} latest=${latest}"
+            echo "vault_code_bytes=${vault_bytes} dex_code_bytes=${dex_bytes}"
+
+            if (( vault_bytes > 0 )); then
+              echo "vault_TYPE=$(cast call "$VAULT" 'TYPE()(uint256)' --rpc-url "$rpc" 2>&1 || true)"
+              echo "vault_ID=$(cast call "$VAULT" 'VAULT_ID()(uint256)' --rpc-url "$rpc" 2>&1 || true)"
+              echo "vault_constants_selector=$(cast call "$VAULT" 0x7a0ed627 --rpc-url "$rpc" 2>&1 | head -c 194 || true)"
+            fi
+            if (( dex_bytes > 0 )); then
+              echo "dex_slot4=$(cast call "$DEX" 'readFromStorage(bytes32)(uint256)' 0x0000000000000000000000000000000000000000000000000000000000000004 --rpc-url "$rpc" 2>&1 || true)"
+            fi
+          }
+
+          {
+            probe Ethereum 1 https://ethereum-rpc.publicnode.com
+            probe Arbitrum 42161 https://arbitrum-one-rpc.publicnode.com
+            probe Base 8453 https://base-rpc.publicnode.com
+            probe Polygon 137 https://polygon-bor-rpc.publicnode.com
+            probe Plasma 9745 https://rpc.plasma.to
+            probe Optimism 10 https://optimism-rpc.publicnode.com
+            probe Avalanche 43114 https://avalanche-c-chain-rpc.publicnode.com
+            probe BNB 56 https://bsc-rpc.publicnode.com
+            probe Sonic 146 https://sonic-rpc.publicnode.com
+          } | tee evidence-chain-locator/results.txt
+
+      - name: Upload locator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluid-address-chain-locator
+          path: evidence-chain-locator/
+          if-no-files-found: error
+          retention-days: 30
