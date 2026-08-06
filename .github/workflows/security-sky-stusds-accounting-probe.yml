@@ -1,0 +1,146 @@
+name: Security Sky stUSDS accounting probe
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-stusds-accounting-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/stusds
+          ref: master
+          path: target
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Preserve source and run upstream suite
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p evidence/source
+          cp target/src/StUsds.sol evidence/source/StUsds.sol
+          cp target/certora/StUsds.spec evidence/source/StUsds.spec || true
+          git -C target rev-parse HEAD > evidence/commit.txt
+          set +e
+          (cd target && forge build) > evidence/build.log 2>&1
+          echo $? > evidence/build-exit.txt
+          (cd target && forge test --threads 1 -vvv) > evidence/upstream-tests.log 2>&1
+          echo $? > evidence/tests-exit.txt
+          set -e
+
+          python3 - <<'PY'
+          import pathlib,re
+          p=pathlib.Path('target/src/StUsds.sol')
+          s=p.read_text()
+          names=['maxDeposit','maxMint','maxWithdraw','maxRedeem','previewDeposit','previewMint','previewWithdraw','previewRedeem','deposit','mint','withdraw','redeem','permit']
+          out=[]
+          for name in names:
+              m=re.search(r'function\s+'+name+r'\b',s)
+              if not m: continue
+              start=m.start(); brace=s.find('{',start)
+              if brace<0: continue
+              d=0; end=brace
+              for i in range(brace,len(s)):
+                  d += (s[i]=='{')-(s[i]=='}')
+                  if d==0:
+                      end=i+1;break
+              out.append('\n===== '+name+' =====\n'+s[start:end])
+          pathlib.Path('evidence/erc4626-functions.sol.txt').write_text('\n'.join(out))
+          PY
+
+          grep -RInE 'round|precision|donat|inflation|first depos|last depos|insolv|Due\(|line|chi|preview|withdraw|redeem|mint|deposit' \
+            target/test target/certora target/audit 2>/dev/null > evidence/accounting-references.txt || true
+
+      - name: Add standalone arithmetic model tests
+        shell: bash
+        working-directory: target
+        run: |
+          cat > test/AccountingProbe.t.sol <<'SOL'
+          // SPDX-License-Identifier: AGPL-3.0-or-later
+          pragma solidity ^0.8.21;
+          import "forge-std/Test.sol";
+
+          contract AccountingProbe is Test {
+              uint256 constant RAY = 1e27;
+
+              function sharesForDeposit(uint256 assets, uint256 chi) internal pure returns (uint256) {
+                  return assets * RAY / chi;
+              }
+              function sharesForMint(uint256 shares, uint256 chi) internal pure returns (uint256 assets) {
+                  assets = shares == 0 ? 0 : ((shares * chi - 1) / RAY) + 1;
+              }
+              function assetsForWithdraw(uint256 assets, uint256 chi) internal pure returns (uint256 shares) {
+                  shares = assets == 0 ? 0 : ((assets * RAY - 1) / chi) + 1;
+              }
+              function assetsForRedeem(uint256 shares, uint256 chi) internal pure returns (uint256) {
+                  return shares * chi / RAY;
+              }
+
+              function testFuzzRoundTripDepositRedeemNeverProfits(uint128 assets_, uint128 chiDelta_) public pure {
+                  uint256 assets = bound(uint256(assets_), 1, 1e36);
+                  uint256 chi = RAY + bound(uint256(chiDelta_), 0, 1e27);
+                  uint256 shares = sharesForDeposit(assets, chi);
+                  uint256 returnedAssets = assetsForRedeem(shares, chi);
+                  assertLe(returnedAssets, assets);
+              }
+
+              function testFuzzMintWithdrawRoundingNeverUndercharges(uint128 shares_, uint128 chiDelta_) public pure {
+                  uint256 shares = bound(uint256(shares_), 1, 1e36);
+                  uint256 chi = RAY + bound(uint256(chiDelta_), 0, 1e27);
+                  uint256 paid = sharesForMint(shares, chi);
+                  uint256 burned = assetsForWithdraw(paid, chi);
+                  assertGe(burned, shares);
+              }
+
+              function testFuzzRepeatedDustCannotCreateShares(uint96 loops_, uint128 chiDelta_) public pure {
+                  uint256 loops = bound(uint256(loops_), 1, 10000);
+                  uint256 chi = RAY + bound(uint256(chiDelta_), 1, 1e27);
+                  uint256 paid;
+                  uint256 shares;
+                  for (uint256 i; i < loops; ++i) {
+                      uint256 a = 1;
+                      paid += a;
+                      shares += sharesForDeposit(a, chi);
+                  }
+                  uint256 returnedAssets = assetsForRedeem(shares, chi);
+                  assertLe(returnedAssets, paid);
+              }
+          }
+          SOL
+
+          set +e
+          forge test --threads 1 --match-path test/AccountingProbe.t.sol -vvvv > ../evidence/accounting-probe.log 2>&1
+          echo $? > ../evidence/accounting-probe-exit.txt
+          set -e
+
+      - name: Generate result summary
+        shell: bash
+        run: |
+          {
+            echo "commit=$(cat evidence/commit.txt)"
+            echo "build_exit=$(cat evidence/build-exit.txt)"
+            echo "upstream_tests_exit=$(cat evidence/tests-exit.txt)"
+            echo "accounting_probe_exit=$(cat evidence/accounting-probe-exit.txt)"
+            grep -E '\[PASS\]|\[FAIL|Suite result|Ran [0-9]+ test' evidence/accounting-probe.log | tail -100 || true
+            echo '--- ERC4626 functions ---'
+            cat evidence/erc4626-functions.sol.txt
+          } > evidence/summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sky-stusds-accounting-probe
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
