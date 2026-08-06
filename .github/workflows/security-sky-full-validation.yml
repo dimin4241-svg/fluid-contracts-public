@@ -1,4 +1,4 @@
-name: Security Sky canonical IlkRegistry validation
+name: Security Sky canonical governance-retirement validation v3
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 jobs:
   full-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - name: Checkout Sky PoC branch
         uses: actions/checkout@v4
@@ -33,12 +33,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence-sky-full-validation
+          mkdir -p evidence-sky-full-validation-v3
           REG=0x5a464C28D19848f44199D003BeF5ecc87d090F87
           endpoints=(
             'https://mainnet.gateway.tenderly.co'
-            'https://ethereum-rpc.publicnode.com'
             'https://eth.drpc.org'
+            'https://ethereum-rpc.publicnode.com'
             'https://rpc.payload.de'
             'https://eth-mainnet.public.blastapi.io'
           )
@@ -50,7 +50,7 @@ jobs:
                 echo "baseline_rpc=$rpc"
                 echo "historical_block_23118263_count=$historical"
                 echo "snapshot_block_25694337_count=$snapshot"
-              } | tee evidence-sky-full-validation/baselines.log
+              } | tee evidence-sky-full-validation-v3/baselines.log
               exit 0
             fi
           done
@@ -62,18 +62,18 @@ jobs:
         working-directory: sky-poc
         run: |
           set -o pipefail
-          forge build 2>&1 | tee ../evidence-sky-full-validation/forge-build.log
+          forge build 2>&1 | tee ../evidence-sky-full-validation-v3/forge-build.log
 
       - name: Run canonical proofs sequentially with RPC failover
         shell: bash
         working-directory: sky-poc
         run: |
           set -uo pipefail
-          : > ../evidence-sky-full-validation/forge-test.log
+          : > ../evidence-sky-full-validation-v3/forge-test.log
           endpoints=(
             'https://mainnet.gateway.tenderly.co'
-            'https://ethereum-rpc.publicnode.com'
             'https://eth.drpc.org'
+            'https://ethereum-rpc.publicnode.com'
             'https://rpc.payload.de'
             'https://eth-mainnet.public.blastapi.io'
           )
@@ -81,57 +81,92 @@ jobs:
           run_case() {
             local label="$1"
             shift
-            local tmp="../evidence-sky-full-validation/${label}.log"
+            local tmp="../evidence-sky-full-validation-v3/${label}.log"
             local rpc rc
             for rpc in "${endpoints[@]}"; do
-              echo "=== $label via $rpc ===" | tee -a ../evidence-sky-full-validation/forge-test.log
+              echo "=== $label via $rpc ===" | tee -a ../evidence-sky-full-validation-v3/forge-test.log
               ETH_RPC_URL="$rpc" forge test --threads 1 "$@" -vv 2>&1 | tee "$tmp"
               rc=${PIPESTATUS[0]}
-              cat "$tmp" >> ../evidence-sky-full-validation/forge-test.log
+              cat "$tmp" >> ../evidence-sky-full-validation-v3/forge-test.log
               if [[ "$rc" == 0 ]]; then
-                echo "CASE_PASS $label rpc=$rpc" | tee -a ../evidence-sky-full-validation/forge-test.log
+                echo "CASE_PASS $label rpc=$rpc" | tee -a ../evidence-sky-full-validation-v3/forge-test.log
                 return 0
               fi
-              if grep -qiE '429|rate limit|Max retries exceeded|failed to send/recv|database error' "$tmp"; then
-                echo "RPC_RETRY $label rpc=$rpc" | tee -a ../evidence-sky-full-validation/forge-test.log
+              if grep -qiE '429|rate limit|Max retries exceeded|failed to send/recv|database error|connection reset|timed out' "$tmp"; then
+                echo "RPC_RETRY $label rpc=$rpc" | tee -a ../evidence-sky-full-validation-v3/forge-test.log
                 sleep 3
                 continue
               fi
-              echo "CASE_FAIL_NON_RPC $label rpc=$rpc" | tee -a ../evidence-sky-full-validation/forge-test.log
+              echo "CASE_FAIL_NON_RPC $label rpc=$rpc" | tee -a ../evidence-sky-full-validation-v3/forge-test.log
               return "$rc"
             done
-            echo "CASE_FAIL_ALL_RPCS $label" | tee -a ../evidence-sky-full-validation/forge-test.log
+            echo "CASE_FAIL_ALL_RPCS $label" | tee -a ../evidence-sky-full-validation-v3/forge-test.log
             return 1
           }
 
-          run_case atomic-governance-reversal \
-            --match-path src/IlkRegistryAtomicGovernanceReversal.t.sol \
-            --match-test testOneUnprivilegedTransactionCastsSpellAndReversesCleanup || exit 1
-          sleep 3
+          run_case atomic-oracle-retirement \
+            --match-path src/IlkRegistryAtomicOracleRetirementProof.t.sol \
+            --match-test testOneExternalCallReactivatesRetiredOraclePathIntoVat || exit 1
+          sleep 2
 
-          run_case historical-mass-restoration \
-            --match-path src/IlkRegistryMassReAdd.t.sol \
-            --match-test testAttackerMassReAddsGovernanceRemovedIlks || exit 1
-          sleep 3
+          run_case current-one-call-vat \
+            --match-path src/IlkRegistryCurrentAtomicVatPropagation.t.sol \
+            --match-test testCurrentOneExternalCallRestoresLegacyPathsAndChangesVat || exit 1
+          sleep 2
+
+          run_case chainlog-retirement-differential \
+            --match-path src/IlkRegistryChainlogRetirementBypass.t.sol \
+            --match-test testAtomicReAddBypassesCoordinatedChainlogOracleRetirement || exit 1
+          sleep 2
 
           run_case current-exact-restoration \
             --match-path src/IlkRegistryCurrentMassReAdd.t.sol \
             --match-test testCurrentMainnetOneTransactionRestoresExactly31RemovedIlks || exit 1
-          sleep 3
+          sleep 2
 
           run_case residual-art-negative-control \
             --match-path src/IlkRegistryCurrentMassReAdd.t.sol \
             --match-test testRwaAdaptersWithResidualArtAreNotPermissionlesslyAddable || exit 1
-          sleep 3
+          sleep 2
 
-          run_case omega-poker-downstream \
-            --match-path src/IlkRegistryOmegaPokerImpact.t.sol \
-            --match-test testMassReAddChangesDeployedOmegaPokerExecution || exit 1
-          sleep 3
+          run_case emergency-osm-reopening \
+            --match-path src/IlkRegistryEmergencySpellImpact.t.sol \
+            --match-test testPostExecutionReAddReopensDeployedMultiOsmStopCompletion || exit 1
+          sleep 2
+
+          run_case emergency-clip-reopening \
+            --match-path src/IlkRegistryEmergencySpellImpact.t.sol \
+            --match-test testPostExecutionReAddReopensDeployedMultiClipBreakerCompletion || exit 1
+          sleep 2
+
+          run_case staged-osm-reexecution \
+            --match-path src/IlkRegistryEmergencyReexecutionGrief.t.sol \
+            --match-test testStagedReAddForcesRepeatedMultiOsmStopExecutions || exit 1
+          sleep 2
+
+          run_case staged-clip-reexecution \
+            --match-path src/IlkRegistryEmergencyReexecutionGrief.t.sol \
+            --match-test testStagedReAddForcesRepeatedMultiClipBreakerExecutions || exit 1
+          sleep 2
 
           run_case persistence-and-mitigation \
             --match-path src/IlkRegistryPersistence.t.sol || exit 1
-          sleep 3
+          sleep 2
+
+          run_case current-public-removal-negative \
+            --match-path src/IlkRegistryCurrentCagedScan.t.sol \
+            --match-test testEnumerateCurrentPubliclyRemovableRegistryEntries || exit 1
+          sleep 2
+
+          run_case residual-automation-negative \
+            --match-path src/IlkRegistryResidualAutomationScan.t.sol \
+            --match-test testScanRemovedIlksForResidualDebtCeilingAutomation || exit 1
+          sleep 2
+
+          run_case legacy-auction-negative \
+            --match-path src/IlkRegistryLegacyAuctionStateScan.t.sol \
+            --match-test testScanRestoredLegacyClippersForActiveAuctionsAndBalances || exit 1
+          sleep 2
 
           run_case keeper-bounded-impact \
             --match-path src/IlkRegistryKeeperGas.t.sol \
@@ -142,18 +177,18 @@ jobs:
         shell: bash
         run: |
           {
-            cat evidence-sky-full-validation/baselines.log 2>/dev/null || true
+            cat evidence-sky-full-validation-v3/baselines.log 2>/dev/null || true
             echo '--- build ---'
-            grep -E '(Compiling|Compiler run successful|Error:|Warning)' evidence-sky-full-validation/forge-build.log 2>/dev/null || true
+            grep -E '(Compiling|Compiler run successful|Error:|Warning)' evidence-sky-full-validation-v3/forge-build.log 2>/dev/null || true
             echo '--- canonical cases ---'
-            grep -E '(CASE_PASS|CASE_FAIL|RPC_RETRY|Suite result|\[PASS\]|\[FAIL\])' evidence-sky-full-validation/forge-test.log 2>/dev/null || true
-          } | tee evidence-sky-full-validation/summary.log
+            grep -E '(CASE_PASS|CASE_FAIL|RPC_RETRY|Suite result|\[PASS\]|\[FAIL\])' evidence-sky-full-validation-v3/forge-test.log 2>/dev/null || true
+          } | tee evidence-sky-full-validation-v3/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-canonical-ilk-registry-validation
-          path: evidence-sky-full-validation/
+          name: sky-canonical-governance-retirement-validation-v3
+          path: evidence-sky-full-validation-v3/
           if-no-files-found: error
           retention-days: 30
