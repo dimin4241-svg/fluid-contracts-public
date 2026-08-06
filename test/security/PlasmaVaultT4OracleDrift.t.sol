@@ -17,6 +17,10 @@ interface IFluidOracleDriftProbe {
     function getExchangeRateLiquidate() external view returns (uint256);
 }
 
+interface IPlasmaVaultResolverDriftProbe {
+    function getContractForDeployerIndex(address vault, uint256 index) external view returns (address);
+}
+
 interface IPlasmaVaultFactoryDriftProbe {
     function owner() external view returns (address);
     function totalVaults() external view returns (uint256);
@@ -55,6 +59,7 @@ interface IPlasmaVaultDriftProbe {
 
 contract PlasmaVaultT4OracleDriftTest is Test {
     address internal constant FACTORY = 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d;
+    address internal constant VAULT_RESOLVER = 0xA5C3E16523eeeDDcC34706b0E6bE88b4c6EA95cC;
     uint256 internal constant T4_TYPE = 40_000;
     uint256 internal constant X30 = (1 << 30) - 1;
 
@@ -68,6 +73,20 @@ contract PlasmaVaultT4OracleDriftTest is Test {
         uint256 vaultId;
         uint256 totalBorrowEncoded;
     }
+
+    event T4Candidate(
+        uint256 indexed vaultId,
+        address indexed vault,
+        address indexed deployer,
+        address oracle,
+        address supplyDex,
+        address borrowDex,
+        uint256 oracleNonce,
+        uint256 oracleCodeLength,
+        uint256 totalBorrowEncoded,
+        uint256 operateRate,
+        uint256 liquidateRate
+    );
 
     event DriftTarget(
         uint256 indexed vaultId,
@@ -198,21 +217,50 @@ contract PlasmaVaultT4OracleDriftTest is Test {
                 continue;
             }
 
-            IPlasmaVaultDriftProbe.ConstantViews memory c =
-                IPlasmaVaultDriftProbe(vault).constantsView();
+            IPlasmaVaultDriftProbe.ConstantViews memory c = IPlasmaVaultDriftProbe(vault).constantsView();
 
             vm.prank(factoryOwner);
             uint256 vaultVariables = IPlasmaVaultDriftProbe(vault).readFromStorage(bytes32(uint256(0)));
             uint256 totalBorrowEncoded = (vaultVariables >> 146) & type(uint64).max;
-            if (totalBorrowEncoded == 0) continue;
 
             vm.prank(factoryOwner);
             uint256 vaultVariables2 = IPlasmaVaultDriftProbe(vault).readFromStorage(bytes32(uint256(1)));
             uint256 oracleNonce = (vaultVariables2 >> 92) & X30;
-            address oracle = _addressCalc(c.deployer, oracleNonce);
+            address oracle = IPlasmaVaultResolverDriftProbe(VAULT_RESOLVER)
+                .getContractForDeployerIndex(vault, oracleNonce);
 
-            require(oracle.code.length > 0, "oracle has no code");
-            require(c.borrow.code.length > 0, "borrow DEX has no code");
+            uint256 operateRate;
+            uint256 liquidateRate;
+            if (oracle.code.length > 0) {
+                try IFluidOracleDriftProbe(oracle).getExchangeRateOperate() returns (uint256 rate) {
+                    operateRate = rate;
+                } catch {}
+                try IFluidOracleDriftProbe(oracle).getExchangeRateLiquidate() returns (uint256 rate) {
+                    liquidateRate = rate;
+                } catch {}
+            }
+
+            emit T4Candidate(
+                vaultId,
+                vault,
+                c.deployer,
+                oracle,
+                c.supply,
+                c.borrow,
+                oracleNonce,
+                oracle.code.length,
+                totalBorrowEncoded,
+                operateRate,
+                liquidateRate
+            );
+
+            if (
+                totalBorrowEncoded == 0 ||
+                oracle.code.length == 0 ||
+                operateRate == 0 ||
+                liquidateRate == 0 ||
+                c.borrow.code.length == 0
+            ) continue;
 
             target = Target({
                 vault: vault,
@@ -227,7 +275,7 @@ contract PlasmaVaultT4OracleDriftTest is Test {
             return target;
         }
 
-        revert("no active Plasma T4 vault");
+        revert("no active Plasma T4 vault with live oracle");
     }
 
     function _fundAndApprove(address token, address spender) internal {
@@ -239,22 +287,5 @@ contract PlasmaVaultT4OracleDriftTest is Test {
             abi.encodeWithSignature("approve(address,uint256)", spender, type(uint256).max)
         );
         require(ok && (data.length == 0 || abi.decode(data, (bool))), "approve failed");
-    }
-
-    function _addressCalc(address deployedFrom, uint256 nonce) internal pure returns (address calculated) {
-        bytes memory data;
-        if (nonce == 0) return address(0);
-        if (nonce <= 0x7f) {
-            data = abi.encodePacked(bytes1(0xd6), bytes1(0x94), deployedFrom, uint8(nonce));
-        } else if (nonce <= 0xff) {
-            data = abi.encodePacked(bytes1(0xd7), bytes1(0x94), deployedFrom, bytes1(0x81), uint8(nonce));
-        } else if (nonce <= 0xffff) {
-            data = abi.encodePacked(bytes1(0xd8), bytes1(0x94), deployedFrom, bytes1(0x82), uint16(nonce));
-        } else if (nonce <= 0xffffff) {
-            data = abi.encodePacked(bytes1(0xd9), bytes1(0x94), deployedFrom, bytes1(0x83), uint24(nonce));
-        } else {
-            data = abi.encodePacked(bytes1(0xda), bytes1(0x94), deployedFrom, bytes1(0x84), uint32(nonce));
-        }
-        calculated = address(uint160(uint256(keccak256(data))));
     }
 }
