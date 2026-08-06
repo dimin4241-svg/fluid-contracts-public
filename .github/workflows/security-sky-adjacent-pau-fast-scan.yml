@@ -1,0 +1,117 @@
+name: Security Sky adjacent PAU fast scan
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-adjacent-pau-fast-scan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source only
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/diamond-pau
+          ref: dev
+          path: target
+          submodules: false
+
+      - name: Analyze all PAU entrypoints and accounting order
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/source
+          cp -R target/src evidence/source/
+          cp target/README.md evidence/source/README.md
+          git -C target rev-parse HEAD > evidence/target-commit.txt
+
+          python3 - <<'PY'
+          import pathlib, re, json
+          root = pathlib.Path('target/src')
+          funcs=[]
+          for path in sorted(root.rglob('*.sol')):
+              text=path.read_text(errors='ignore')
+              lines=text.splitlines()
+              i=0
+              while i < len(lines):
+                  if re.search(r'\bfunction\b', lines[i]):
+                      start=i
+                      sig=lines[i].strip()
+                      j=i
+                      while '{' not in sig and ';' not in sig and j+1<len(lines) and len(sig)<2500:
+                          j+=1; sig+=' '+lines[j].strip()
+                      m=re.search(r'function\s+([A-Za-z0-9_]*)',sig)
+                      vis=re.search(r'\b(external|public)\b',sig)
+                      if m and vis and '{' in sig:
+                          depth=sig.count('{')-sig.count('}')
+                          body=[sig]
+                          k=j+1
+                          while depth>0 and k<len(lines):
+                              body.append(lines[k]); depth+=lines[k].count('{')-lines[k].count('}'); k+=1
+                          bodytxt='\n'.join(body)
+                          funcs.append({
+                            'file':str(path),'line':start+1,'name':m.group(1),'visibility':vis.group(1),
+                            'signature':sig,'body':bodytxt,
+                            'guarded':bool(re.search(r'onlyRole\s*\(|onlyAdmin\b|\bauth\b|\btoll\b',sig)),
+                            'view':bool(re.search(r'\b(view|pure)\b',sig)),
+                            'external_calls':len(re.findall(r'\.doCall|\.functionCall|\.call\b|\.delegatecall|\.transfer\b|\.transferFrom\b|\.approve\b',bodytxt)),
+                            'rate_decrease':bodytxt.count('_decreaseRateLimit'),
+                            'rate_increase':bodytxt.count('_increaseRateLimit')+bodytxt.count('_tryIncreaseRateLimit'),
+                            'balance_delta':bodytxt.count('startingBalance')+bodytxt.count('startingAssets')+bodytxt.count('startingShares'),
+                          })
+                          i=max(i,k-1)
+                  i+=1
+
+          with open('evidence/functions.json','w') as f: json.dump(funcs,f,indent=2)
+          with open('evidence/entrypoints.tsv','w') as f:
+              f.write('file\tline\tname\tvisibility\tguarded\tview\texternal_calls\trate_decrease\trate_increase\tbalance_delta\n')
+              for x in funcs:
+                  f.write('\t'.join(map(str,[x[k] for k in ['file','line','name','visibility','guarded','view','external_calls','rate_decrease','rate_increase','balance_delta']]))+'\n')
+          with open('evidence/unprotected-mutating.tsv','w') as f:
+              f.write('file\tline\tname\tsignature\n')
+              for x in funcs:
+                  if not x['guarded'] and not x['view']:
+                      f.write(f"{x['file']}\t{x['line']}\t{x['name']}\t{x['signature']}\n")
+          with open('evidence/external-call-without-rate-limit.tsv','w') as f:
+              f.write('file\tline\tname\tguarded\texternal_calls\tbalance_delta\n')
+              for x in funcs:
+                  if x['external_calls'] and x['rate_decrease']==0 and not x['view']:
+                      f.write('\t'.join(map(str,[x[k] for k in ['file','line','name','guarded','external_calls','balance_delta']]))+'\n')
+          with open('evidence/rate-limit-recredit.tsv','w') as f:
+              f.write('file\tline\tname\tdecrease\tincrease\tbalance_delta\n')
+              for x in funcs:
+                  if x['rate_increase']:
+                      f.write('\t'.join(map(str,[x[k] for k in ['file','line','name','rate_decrease','rate_increase','balance_delta']]))+'\n')
+          PY
+
+          grep -RInE 'delegatecall|doDelegateCall|functionDelegateCall|callback|receive[A-Za-z]*\(|on[A-Za-z]*Received|flashLoan|executeOperation|uniswapV3|unlockCallback|fallback\(' \
+            target/src > evidence/callback-delegatecall-lines.txt || true
+          grep -RInE 'TODO|FIXME|without integration testing|not integration tested|assumes|assumption|unsafe|unchecked|slither-disable' \
+            target/src > evidence/assumptions-warnings.txt || true
+          grep -RInE '_tryIncreaseRateLimit|_increaseRateLimit|triggerRateLimitIncrease' \
+            target/src > evidence/rate-limit-increases.txt || true
+
+          {
+            echo '=== UNPROTECTED MUTATING ==='; cat evidence/unprotected-mutating.tsv
+            echo; echo '=== EXTERNAL CALL WITHOUT RATE DECREASE ==='; cat evidence/external-call-without-rate-limit.tsv
+            echo; echo '=== RATE LIMIT RECREDITS ==='; cat evidence/rate-limit-recredit.tsv
+            echo; echo '=== CALLBACK / DELEGATECALL ==='; cat evidence/callback-delegatecall-lines.txt
+          } > evidence/summary.txt
+
+          tar -czf evidence/pau-source.tgz -C target src README.md foundry.toml remappings.txt
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-adjacent-pau-fast-scan
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
