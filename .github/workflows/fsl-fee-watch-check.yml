@@ -1,5 +1,6 @@
 name: fSL feeOrReward one-shot check
 
+# Fresh verification trigger: 2026-08-06T12:55:00Z
 on:
   push:
     branches: [main]
