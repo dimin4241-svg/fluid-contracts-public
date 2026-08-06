@@ -1,0 +1,70 @@
+name: Security Plasma Vault T4 pair inventory
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4PairInventory.t.sol'
+      - '.github/workflows/security-plasma-vault-t4-pair-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pair-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated pair inventory
+        shell: bash
+        run: |
+          rm -rf audit/t4-pair-inventory-poc
+          mkdir -p audit/t4-pair-inventory-poc/test audit/t4-pair-inventory-poc/lib evidence-vault-t4-pairs
+          cp test/security/PlasmaVaultT4PairInventory.t.sol audit/t4-pair-inventory-poc/test/
+          cp -R lib/forge-std audit/t4-pair-inventory-poc/lib/forge-std
+
+      - name: Enumerate T4 supply and borrow pairs
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/t4-pair-inventory-poc \
+            --via-ir \
+            --match-path test/PlasmaVaultT4PairInventory.t.sol \
+            -vvvv 2>&1 | tee evidence-vault-t4-pairs/t4-pairs.log
+
+      - name: Extract summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(PairInventoryHeader|T4Pair|PairSummary)\(|Suite result|Failing tests|Error:" \
+            evidence-vault-t4-pairs/t4-pairs.log \
+            | tee evidence-vault-t4-pairs/t4-pairs-summary.log || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-pair-inventory
+          path: evidence-vault-t4-pairs/
+          if-no-files-found: error
+          retention-days: 30
