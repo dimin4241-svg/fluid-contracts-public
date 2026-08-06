@@ -1,0 +1,58 @@
+name: Plasma T4 pure DEX debt close matrix V2
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-exact-debt-controls-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol'
+      - '.github/workflows/plasma-t4-pure-dex-close-matrix-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated matrix V2
+        shell: bash
+        run: |
+          rm -rf audit/t4-pure-dex-matrix-v2
+          mkdir -p audit/t4-pure-dex-matrix-v2/test audit/t4-pure-dex-matrix-v2/lib evidence-matrix-v2
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/t4-pure-dex-matrix-v2/test/
+          cp -R lib/forge-std audit/t4-pure-dex-matrix-v2/lib/forge-std
+      - name: Run pinned three-control matrix V2
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/t4-pure-dex-matrix-v2 --via-ir \
+            --match-path test/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol -vvvv 2>&1 \
+            | tee evidence-matrix-v2/matrix-v2.log
+      - name: Extract numerical evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(MatrixV2Surface|MatrixV2Baseline|MatrixV2PerturbFlow|MatrixV2PerturbStorage|MatrixV2InteractionAmounts|MatrixV2InteractionShares|MatrixV2InteractionMetrics|MatrixV2Residual|MatrixV2Scale|MatrixV2PositionComparison)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-matrix-v2/matrix-v2.log | tee evidence-matrix-v2/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-matrix-v2/block.txt
+          git rev-parse HEAD > evidence-matrix-v2/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-pure-dex-close-matrix-v2
+          path: evidence-matrix-v2/
+          if-no-files-found: error
+          retention-days: 30
