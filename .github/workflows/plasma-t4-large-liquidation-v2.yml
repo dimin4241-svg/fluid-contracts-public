@@ -1,0 +1,60 @@
+name: Plasma T4 large liquidation reachability V2
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-liquidation-20260806
+    paths:
+      - '.github/workflows/plasma-t4-large-liquidation-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  large-reachability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated large reachability test
+        shell: bash
+        run: |
+          rm -rf audit/large-liquidation-v2
+          mkdir -p audit/large-liquidation-v2/test audit/large-liquidation-v2/lib evidence-large-v2
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/large-liquidation-v2/test/
+          cp test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol audit/large-liquidation-v2/test/
+          cp test/security/PlasmaVaultT4LargeLiquidationReachabilityV2.t.sol audit/large-liquidation-v2/test/
+          cp -R lib/forge-std audit/large-liquidation-v2/lib/forge-std
+      - name: Run large reachability test
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/large-liquidation-v2 --via-ir \
+            --match-contract PlasmaVaultT4LargeLiquidationReachabilityV2Test \
+            --match-test test_largeLiquidationReachabilityV2 -vvvv 2>&1 \
+            | tee evidence-large-v2/large-v2.log
+      - name: Extract large reachability evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(LargeV2Config|LargeV2Reachability|LargeV2Flow|LargeV2Oracle|LargeV2Liquidation|LargeV2VaultStorage|LargeV2DexStorage)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-large-v2/large-v2.log | tee evidence-large-v2/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-large-v2/block.txt
+          git rev-parse HEAD > evidence-large-v2/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-large-liquidation-reachability-v2
+          path: evidence-large-v2/
+          if-no-files-found: error
+          retention-days: 30
