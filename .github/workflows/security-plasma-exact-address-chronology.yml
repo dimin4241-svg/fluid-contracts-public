@@ -16,11 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      PLASMA_RPC_URL: https://rpc.plasma.to
-      VAULT: 0x6E0Cdb5c21B3c8E340E9C9210057035bAfA86ffF
-      DEX: 0xbd5dD095d9a6565C8222bb36B5814953F1C46f71
-      CLAIMED_BLOCK: 12386164
-      RECORDED_LIVE_BLOCK: 29082579
+      PLASMA_RPC_URL: 'https://rpc.plasma.to'
+      VAULT: '0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF'
+      DEX: '0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71'
+      CLAIMED_BLOCK: '12386164'
+      RECORDED_LIVE_BLOCK: '29082579'
     steps:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
