@@ -29,30 +29,45 @@ jobs:
         with:
           version: stable
 
-      - name: Select archive-capable Ethereum RPC
+      - name: Select stable archive-capable Ethereum RPC
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence-sky-ilk-registry-race
           endpoints=(
+            'https://eth.drpc.org'
+            'https://rpc.payload.de'
+            'https://eth-mainnet.public.blastapi.io'
+            'https://mainnet.gateway.tenderly.co'
             'https://ethereum-rpc.publicnode.com'
-            'https://eth.llamarpc.com'
             'https://1rpc.io/eth'
           )
           for rpc in "${endpoints[@]}"; do
             echo "Testing $rpc" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
-            if timeout 25 cast call \
-              0x5a464C28D19848f44199D003BeF5ecc87d090F87 \
-              'count()(uint256)' \
-              --block 23118263 \
-              --rpc-url "$rpc" \
-              >> evidence-sky-ilk-registry-race/rpc-selection.log 2>&1; then
+            stable=1
+            for attempt in 1 2; do
+              if ! output=$(timeout 30 cast call \
+                0x5a464C28D19848f44199D003BeF5ecc87d090F87 \
+                'count()(uint256)' \
+                --block 23118263 \
+                --rpc-url "$rpc" 2>&1); then
+                stable=0
+                echo "attempt=$attempt failed: $output" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
+                break
+              fi
+              echo "attempt=$attempt output=$output" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
+              if ! [[ "$output" =~ ^[0-9]+ ]]; then
+                stable=0
+                break
+              fi
+            done
+            if [[ "$stable" == 1 ]]; then
               echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
               echo "Selected $rpc" | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
               exit 0
             fi
           done
-          echo 'No archive-capable RPC endpoint succeeded' | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
+          echo 'No stable archive-capable RPC endpoint succeeded' | tee -a evidence-sky-ilk-registry-race/rpc-selection.log
           exit 1
 
       - name: Record exact historical preconditions
@@ -85,6 +100,7 @@ jobs:
         shell: bash
         run: |
           {
+            cat evidence-sky-ilk-registry-race/rpc-selection.log 2>/dev/null || true
             cat evidence-sky-ilk-registry-race/historical-preconditions.log 2>/dev/null || true
             grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|Victim|count|ghost|AAVE)' evidence-sky-ilk-registry-race/forge-test.log 2>/dev/null || true
           } | tee evidence-sky-ilk-registry-race/summary.log
