@@ -18,7 +18,6 @@ jobs:
     timeout-minutes: 30
     env:
       PLASMA_RPC_URL: https://rpc.plasma.to
-      PLASMA_FORK_BLOCK: 12386164
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +27,13 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+
+      - name: Freeze one live Plasma block
+        shell: bash
+        run: |
+          BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")
+          echo "PLASMA_FORK_BLOCK=$BLOCK" >> "$GITHUB_ENV"
+          echo "Frozen Plasma block: $BLOCK"
 
       - name: Prepare isolated debt interaction harness
         shell: bash
@@ -51,6 +57,7 @@ jobs:
         if: always()
         shell: bash
         run: |
+          printf 'PLASMA_FORK_BLOCK=%s\n' "$PLASMA_FORK_BLOCK" | tee evidence-plasma-vault-t4-debt-interaction/block.txt
           grep -E "(ProbeMetadata|CloseScenario|DebtShareInteraction)\(|Suite result|Failing tests|Error:|revert" \
             evidence-plasma-vault-t4-debt-interaction/interaction.log \
             | tee evidence-plasma-vault-t4-debt-interaction/summary.log || true
