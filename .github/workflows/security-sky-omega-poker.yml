@@ -1,4 +1,4 @@
-name: Security Sky OmegaPoker impact standard compile
+name: Security Sky OmegaPoker exact downstream deltas
 
 on:
   push:
@@ -35,11 +35,11 @@ jobs:
           set -euo pipefail
           mkdir -p evidence-sky-omega-poker
           endpoints=(
-            'https://eth-mainnet.public.blastapi.io'
             'https://mainnet.gateway.tenderly.co'
             'https://ethereum-rpc.publicnode.com'
             'https://eth.drpc.org'
             'https://rpc.payload.de'
+            'https://eth-mainnet.public.blastapi.io'
           )
           for rpc in "${endpoints[@]}"; do
             if output=$(timeout 30 cast call 0xDd538C362dF996727054AC8Fb67ef5394eC9b8b9 'ilkCount()(uint256)' --block 25694337 --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
@@ -56,6 +56,7 @@ jobs:
         run: |
           set -o pipefail
           forge test \
+            --threads 1 \
             --match-path src/IlkRegistryOmegaPokerImpact.t.sol \
             --match-test testMassReAddChangesDeployedOmegaPokerExecution \
             -vvvv 2>&1 | tee ../evidence-sky-omega-poker/forge-test.log
@@ -66,14 +67,14 @@ jobs:
         run: |
           {
             cat evidence-sky-omega-poker/rpc.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|fork block|registry count|restored legacy|Omega ilk count|Omega OSM count|legacy ilks cached|refresh gas|poke gas|legacy Vat spots|block gas limit)' evidence-sky-omega-poker/forge-test.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|Omega changed legacy ilk|spot before|spot after|fork block|registry count|restored legacy|Omega ilk count|Omega OSM count|legacy ilks cached|refresh gas|poke gas|legacy Vat spots|block gas limit)' evidence-sky-omega-poker/forge-test.log 2>/dev/null || true
           } | tee evidence-sky-omega-poker/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-omega-poker-impact-standard
+          name: sky-omega-poker-exact-downstream-deltas
           path: evidence-sky-omega-poker/
           if-no-files-found: error
           retention-days: 30
