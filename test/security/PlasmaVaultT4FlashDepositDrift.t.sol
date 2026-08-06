@@ -194,7 +194,7 @@ contract PlasmaVaultT4FlashDepositDriftTest is Test {
             abi.encodeWithSelector(
                 IFluidVaultT4FlashDeposit.operatePerfect.selector,
                 p.nftId,
-                -p.colShares,
+                type(int256).min,
                 int256(-1),
                 int256(-1),
                 int256(0),
