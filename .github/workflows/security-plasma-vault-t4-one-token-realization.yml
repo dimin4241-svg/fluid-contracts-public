@@ -1,0 +1,57 @@
+name: Security Plasma Vault T4 one-token realization
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4OneTokenRealization.t.sol'
+      - '.github/workflows/security-plasma-vault-t4-one-token-realization.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  realization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated harness
+        shell: bash
+        run: |
+          rm -rf audit/t4-one-token-realization
+          mkdir -p audit/t4-one-token-realization/test audit/t4-one-token-realization/lib evidence-plasma-vault-t4-one-token-realization
+          cp test/security/PlasmaVaultT4OneTokenRealization.t.sol audit/t4-one-token-realization/test/
+          cp -R lib/forge-std audit/t4-one-token-realization/lib/forge-std
+      - name: Run realization probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/t4-one-token-realization --via-ir \
+            --match-path test/PlasmaVaultT4OneTokenRealization.t.sol -vvvv 2>&1 \
+            | tee evidence-plasma-vault-t4-one-token-realization/realization.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E "RealizedResult\(|Suite result|Failing tests|Error:|revert" \
+            evidence-plasma-vault-t4-one-token-realization/realization.log \
+            | tee evidence-plasma-vault-t4-one-token-realization/summary.log || true
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-one-token-realization
+          path: evidence-plasma-vault-t4-one-token-realization/
+          if-no-files-found: error
+          retention-days: 30
