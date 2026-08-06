@@ -32,10 +32,9 @@ interface IOracleOneSidedBorrow {
 
 contract PlasmaVaultT4OneSidedBorrowLiquidationTest is PlasmaVaultT4LiquidationSurfaceProbeTest {
     address internal constant ORACLE = 0x029E6fF2173ff6c9e61787Fa7A3cfF1117D957b6;
+    address internal constant BORROWER = 0x111111111111111111111111111111111111B077;
     uint256 internal constant COL_GHO = 20_000_000e18;
     uint256 internal constant COL_USDT0 = 20_000_000e6;
-
-    address internal borrower;
 
     event OneSidedCaseReachability(
         bool indexed borrowGho,
@@ -88,13 +87,8 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationTest is PlasmaVaultT4LiquidationS
         bool eligibilityChanged
     );
 
-    function setUp() public override {
-        super.setUp();
-        borrower = makeAddr("one-sided-borrower");
-    }
-
     function _approveBorrower(address token) internal {
-        vm.prank(borrower);
+        vm.prank(BORROWER);
         (bool ok, bytes memory data) = token.call(
             abi.encodeWithSignature("approve(address,uint256)", VAULT, type(uint256).max)
         );
@@ -111,13 +105,13 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationTest is PlasmaVaultT4LiquidationS
     function executeOneSidedCase(bool borrowGho, uint256 requestedAmount1e18) external {
         require(msg.sender == address(this), "self only");
 
-        deal(GHO, borrower, COL_GHO);
-        deal(USDT0, borrower, COL_USDT0);
+        deal(GHO, BORROWER, COL_GHO);
+        deal(USDT0, BORROWER, COL_USDT0);
         _approveBorrower(GHO);
         _approveBorrower(USDT0);
 
         uint256 oracleBefore = IOracleOneSidedBorrow(ORACLE).getExchangeRateLiquidate();
-        vm.prank(borrower);
+        vm.prank(BORROWER);
         (uint256 nftId, int256 colShares, int256 initialDebtShares) =
             IVaultOneSidedBorrow(VAULT).operate(
                 0,
@@ -127,10 +121,10 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationTest is PlasmaVaultT4LiquidationS
                 0,
                 0,
                 0,
-                borrower
+                BORROWER
             );
         require(initialDebtShares == 0, "unexpected initial debt");
-        require(IFactoryOneSidedBorrow(FACTORY).ownerOf(nftId) == borrower, "new NFT owner mismatch");
+        require(IFactoryOneSidedBorrow(FACTORY).ownerOf(nftId) == BORROWER, "new NFT owner mismatch");
 
         uint256 oracleAfterDeposit = IOracleOneSidedBorrow(ORACLE).getExchangeRateLiquidate();
         Simulation memory depositSimulation = _simulate(false);
@@ -150,12 +144,12 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationTest is PlasmaVaultT4LiquidationS
             depositSimulation.expectedResult
         );
 
-        uint256 ghoBefore = IERC20OneSidedBorrow(GHO).balanceOf(borrower);
-        uint256 usdt0Before = IERC20OneSidedBorrow(USDT0).balanceOf(borrower);
+        uint256 ghoBefore = IERC20OneSidedBorrow(GHO).balanceOf(BORROWER);
+        uint256 usdt0Before = IERC20OneSidedBorrow(USDT0).balanceOf(BORROWER);
         int256 debt0 = borrowGho ? int256(requestedAmount1e18) : int256(0);
         int256 debt1 = borrowGho ? int256(0) : int256(requestedAmount1e18 / 1e12);
 
-        vm.prank(borrower);
+        vm.prank(BORROWER);
         (, int256 noColShares, int256 debtShares) = IVaultOneSidedBorrow(VAULT).operate(
             nftId,
             0,
@@ -164,12 +158,12 @@ contract PlasmaVaultT4OneSidedBorrowLiquidationTest is PlasmaVaultT4LiquidationS
             debt0,
             debt1,
             1,
-            borrower
+            BORROWER
         );
         require(noColShares == 0 && debtShares > 0, "unexpected borrow result");
 
-        uint256 receivedGho = IERC20OneSidedBorrow(GHO).balanceOf(borrower) - ghoBefore;
-        uint256 receivedUsdt0 = IERC20OneSidedBorrow(USDT0).balanceOf(borrower) - usdt0Before;
+        uint256 receivedGho = IERC20OneSidedBorrow(GHO).balanceOf(BORROWER) - ghoBefore;
+        uint256 receivedUsdt0 = IERC20OneSidedBorrow(USDT0).balanceOf(BORROWER) - usdt0Before;
         uint256 oracleAfterBorrow = IOracleOneSidedBorrow(ORACLE).getExchangeRateLiquidate();
         int256 borrowDelta = _delta(oracleAfterBorrow, oracleAfterDeposit);
         emit OneSidedBorrowFlow(
