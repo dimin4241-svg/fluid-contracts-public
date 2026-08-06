@@ -40,15 +40,6 @@ jobs:
             if [[ "$dex_code" == 0x* ]]; then dex_bytes=$(( (${#dex_code} - 2) / 2 )); else dex_bytes=-1; fi
             echo "expected_chain=${expected_chain} actual_chain=${chain} latest=${latest}"
             echo "vault_code_bytes=${vault_bytes} dex_code_bytes=${dex_bytes}"
-
-            if (( vault_bytes > 0 )); then
-              echo "vault_TYPE=$(cast call "$VAULT" 'TYPE()(uint256)' --rpc-url "$rpc" 2>&1 || true)"
-              echo "vault_ID=$(cast call "$VAULT" 'VAULT_ID()(uint256)' --rpc-url "$rpc" 2>&1 || true)"
-              echo "vault_constants_selector=$(cast call "$VAULT" 0x7a0ed627 --rpc-url "$rpc" 2>&1 | head -c 194 || true)"
-            fi
-            if (( dex_bytes > 0 )); then
-              echo "dex_slot4=$(cast call "$DEX" 'readFromStorage(bytes32)(uint256)' 0x0000000000000000000000000000000000000000000000000000000000000004 --rpc-url "$rpc" 2>&1 || true)"
-            fi
           }
 
           {
@@ -62,6 +53,34 @@ jobs:
             probe BNB 56 https://bsc-rpc.publicnode.com
             probe Sonic 146 https://sonic-rpc.publicnode.com
           } | tee evidence-chain-locator/results.txt
+
+      - name: Recover Plasma DEX from fSL immutables
+        shell: bash
+        run: |
+          set -u
+          RPC=https://rpc.plasma.to
+          A=0x983107BB3dcb71f3A30176114D8a17c454A62514
+          B=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A
+          {
+            for FSL in "$A" "$B"; do
+              echo "=== fSL ${FSL} ==="
+              CODE="$(cast code "$FSL" --rpc-url "$RPC" 2>/dev/null || echo RPC_ERROR)"
+              if [[ "$CODE" == 0x* ]]; then echo "code_bytes=$(( (${#CODE} - 2) / 2 ))"; else echo "code_bytes=-1"; fi
+              DEX="$(cast call "$FSL" 'DEX()(address)' --rpc-url "$RPC" 2>&1 || true)"
+              T0="$(cast call "$FSL" 'TOKEN0()(address)' --rpc-url "$RPC" 2>&1 || true)"
+              T1="$(cast call "$FSL" 'TOKEN1()(address)' --rpc-url "$RPC" 2>&1 || true)"
+              echo "DEX=${DEX}"
+              echo "TOKEN0=${T0}"
+              echo "TOKEN1=${T1}"
+              echo "name=$(cast call "$FSL" 'name()(string)' --rpc-url "$RPC" 2>&1 || true)"
+              echo "symbol=$(cast call "$FSL" 'symbol()(string)' --rpc-url "$RPC" 2>&1 || true)"
+              if [[ "$DEX" == 0x* ]]; then
+                DEX_CODE="$(cast code "$DEX" --rpc-url "$RPC" 2>/dev/null || echo RPC_ERROR)"
+                if [[ "$DEX_CODE" == 0x* ]]; then echo "resolved_dex_code_bytes=$(( (${#DEX_CODE} - 2) / 2 ))"; fi
+                echo "resolved_dex_slot4=$(cast call "$DEX" 'readFromStorage(bytes32)(uint256)' 0x0000000000000000000000000000000000000000000000000000000000000004 --rpc-url "$RPC" 2>&1 || true)"
+              fi
+            done
+          } | tee evidence-chain-locator/plasma-fsl-immutables.txt
 
       - name: Upload locator evidence
         if: always()
