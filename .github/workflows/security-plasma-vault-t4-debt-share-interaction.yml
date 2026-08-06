@@ -1,0 +1,65 @@
+name: Security Plasma Vault T4 debt share interaction
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4DebtShareInteraction.t.sol'
+      - '.github/workflows/security-plasma-vault-t4-debt-share-interaction.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  interaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 12386164
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Prepare isolated debt interaction harness
+        shell: bash
+        run: |
+          rm -rf audit/t4-debt-interaction-poc
+          mkdir -p audit/t4-debt-interaction-poc/test audit/t4-debt-interaction-poc/lib evidence-plasma-vault-t4-debt-interaction
+          cp test/security/PlasmaVaultT4DebtShareInteraction.t.sol audit/t4-debt-interaction-poc/test/
+          cp -R lib/forge-std audit/t4-debt-interaction-poc/lib/forge-std
+
+      - name: Run live T4 debt share interaction probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/t4-debt-interaction-poc \
+            --via-ir \
+            --match-path test/PlasmaVaultT4DebtShareInteraction.t.sol \
+            -vvvv 2>&1 | tee evidence-plasma-vault-t4-debt-interaction/interaction.log
+
+      - name: Extract interaction evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(ProbeMetadata|CloseScenario|DebtShareInteraction)\(|Suite result|Failing tests|Error:|revert" \
+            evidence-plasma-vault-t4-debt-interaction/interaction.log \
+            | tee evidence-plasma-vault-t4-debt-interaction/summary.log || true
+
+      - name: Upload interaction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-debt-share-interaction
+          path: evidence-plasma-vault-t4-debt-interaction/
+          if-no-files-found: error
+          retention-days: 30
