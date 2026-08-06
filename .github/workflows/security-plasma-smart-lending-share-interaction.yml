@@ -6,6 +6,7 @@ on:
       - audit/plasma-smart-lending-execution-20260806
     paths:
       - 'test/security/PlasmaSmartLendingShareInteraction.t.sol'
+      - 'scripts/security/discover_plasma_fsl_holder.py'
       - '.github/workflows/security-plasma-smart-lending-share-interaction.yml'
   workflow_dispatch:
 
@@ -15,7 +16,7 @@ permissions:
 jobs:
   share-interaction:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       PLASMA_RPC_URL: https://rpc.plasma.to
     steps:
@@ -33,6 +34,13 @@ jobs:
         shell: bash
         run: |
           echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Discover real outstanding fSL6 holder
+        shell: bash
+        run: |
+          mkdir -p evidence-smart-lending-share-interaction
+          python3 scripts/security/discover_plasma_fsl_holder.py \
+            2>&1 | tee evidence-smart-lending-share-interaction/holder-inventory.log
 
       - name: Prepare isolated share-interaction harness
         shell: bash
@@ -56,9 +64,11 @@ jobs:
         if: always()
         shell: bash
         run: |
-          grep -E "(ProbeMetadata|ScenarioResult|InteractionResult)\(|Suite result|Failing tests|Error:" \
-            evidence-smart-lending-share-interaction/share-interaction.log \
-            | tee evidence-smart-lending-share-interaction/share-interaction-summary.log || true
+          {
+            grep -E "HolderInventory\(" evidence-smart-lending-share-interaction/holder-inventory.log || true
+            grep -E "(ProbeMetadata|ScenarioResult|InteractionResult)\(|Suite result|Failing tests|Error:" \
+              evidence-smart-lending-share-interaction/share-interaction.log || true
+          } | tee evidence-smart-lending-share-interaction/share-interaction-summary.log
 
       - name: Upload share-interaction evidence
         if: always()
