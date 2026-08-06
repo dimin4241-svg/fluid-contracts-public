@@ -4,6 +4,7 @@ pragma solidity 0.8.21;
 import {Test} from "forge-std/Test.sol";
 
 interface IFactoryT4Inventory {
+    function owner() external view returns (address);
     function totalVaults() external view returns (uint256);
     function getVaultAddress(uint256 vaultId) external view returns (address);
     function totalSupply() external view returns (uint256);
@@ -11,19 +12,20 @@ interface IFactoryT4Inventory {
     function readFromStorage(bytes32 slot) external view returns (uint256);
 }
 
-interface IStorageReadInventory {
+interface IVaultT4Inventory {
+    function TYPE() external view returns (uint256);
+    function LIQUIDITY() external view returns (address);
     function readFromStorage(bytes32 slot) external view returns (uint256);
 }
 
 contract PlasmaVaultT4InventoryTest is Test {
     address internal constant FACTORY = 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d;
 
-    event InventoryHeader(uint256 forkBlock, uint256 totalVaults, uint256 totalNfts);
+    event InventoryHeader(uint256 forkBlock, uint256 totalVaults, uint256 totalNfts, address factoryOwner);
     event VaultInventory(
         uint256 indexed vaultId,
         address indexed vault,
         uint256 vaultType,
-        bool typeGetterAvailable,
         uint256 packedVaultVariables,
         uint256 encodedSupply,
         uint256 encodedBorrow,
@@ -44,23 +46,17 @@ contract PlasmaVaultT4InventoryTest is Test {
         assertEq(block.chainid, 9745, "unexpected chain");
     }
 
-    function _probeUint(address target, bytes4 selector) internal view returns (bool ok, uint256 value) {
-        bytes memory data;
-        (ok, data) = target.staticcall(abi.encodeWithSelector(selector));
-        if (!ok || data.length < 32) return (false, 0);
-        value = abi.decode(data, (uint256));
-    }
-
-    function _probeAddress(address target, bytes4 selector) internal view returns (address value) {
-        (bool ok, uint256 raw) = _probeUint(target, selector);
-        if (ok) value = address(uint160(raw));
-    }
-
     function test_inventoryLiveT4VaultsAndPositions() public {
         IFactoryT4Inventory factory = IFactoryT4Inventory(FACTORY);
         uint256 totalVaults = factory.totalVaults();
         uint256 totalNfts = factory.totalSupply();
-        emit InventoryHeader(block.number, totalVaults, totalNfts);
+        address factoryOwner = factory.owner();
+        emit InventoryHeader(block.number, totalVaults, totalNfts, factoryOwner);
+
+        // Vault getters and StorageRead are auth-gated through the fallback.
+        // Impersonating the actual factory owner on the fork enables read-only
+        // inspection without modifying production state.
+        vm.startPrank(factoryOwner);
 
         address[] memory vaultById = new address[](totalVaults + 1);
         uint256[] memory typeById = new uint256[](totalVaults + 1);
@@ -68,19 +64,18 @@ contract PlasmaVaultT4InventoryTest is Test {
 
         for (uint256 vaultId = 1; vaultId <= totalVaults; ++vaultId) {
             address vault = factory.getVaultAddress(vaultId);
-            (bool typeOk, uint256 vaultType) = _probeUint(vault, bytes4(keccak256("TYPE()")));
-            uint256 vars = IStorageReadInventory(vault).readFromStorage(bytes32(uint256(0)));
-            address liquidity = _probeAddress(vault, bytes4(keccak256("LIQUIDITY()")));
+            uint256 vaultType = IVaultT4Inventory(vault).TYPE();
+            uint256 vars = IVaultT4Inventory(vault).readFromStorage(bytes32(uint256(0)));
+            address liquidity = IVaultT4Inventory(vault).LIQUIDITY();
 
             vaultById[vaultId] = vault;
-            typeById[vaultId] = typeOk ? vaultType : 0;
-            if (typeOk && vaultType == 4) ++t4Vaults;
+            typeById[vaultId] = vaultType;
+            if (vaultType == 4) ++t4Vaults;
 
             emit VaultInventory(
                 vaultId,
                 vault,
                 vaultType,
-                typeOk,
                 vars,
                 (vars >> 82) & type(uint64).max,
                 (vars >> 146) & type(uint64).max,
@@ -100,12 +95,13 @@ contract PlasmaVaultT4InventoryTest is Test {
             ++t4FactoryNfts;
             address vault = vaultById[vaultId];
             bytes32 positionSlot = keccak256(abi.encode(nftId, uint256(3)));
-            uint256 positionData = IStorageReadInventory(vault).readFromStorage(positionSlot);
+            uint256 positionData = IVaultT4Inventory(vault).readFromStorage(positionSlot);
             if (positionData != 0) ++t4NonzeroPositions;
 
             emit T4Position(nftId, vaultId, vault, factory.ownerOf(nftId), positionData);
         }
 
+        vm.stopPrank();
         emit T4Summary(t4Vaults, t4FactoryNfts, t4NonzeroPositions);
     }
 }
