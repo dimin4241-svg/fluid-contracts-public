@@ -1,4 +1,4 @@
-name: Security Sky current mainnet mass re-add
+name: Security Sky keeper impact after mass re-add
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 jobs:
   fork-proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout Sky PoC branch
         uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence-sky-ilk-registry-current
+          mkdir -p evidence-sky-keeper-impact
           endpoints=(
             'https://eth.drpc.org'
             'https://rpc.payload.de'
@@ -44,36 +44,36 @@ jobs:
           for rpc in "${endpoints[@]}"; do
             if output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
               echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
-              echo "selected=$rpc current_registry_count=$output" | tee evidence-sky-ilk-registry-current/rpc.log
+              echo "selected=$rpc current_registry_count=$output" | tee evidence-sky-keeper-impact/rpc.log
               exit 0
             fi
           done
           exit 1
 
-      - name: Run current-mainnet one-transaction proof
+      - name: Compare deployed keeper jobs and Sequencer batch
         shell: bash
         working-directory: sky-poc
         run: |
           set -o pipefail
           forge test \
-            --match-path src/IlkRegistryCurrentMassReAdd.t.sol \
-            --match-test testCurrentMainnetOneTransactionRestoresRemovedIlks \
-            -vvvv 2>&1 | tee ../evidence-sky-ilk-registry-current/forge-test.log
+            --match-path src/IlkRegistryKeeperGas.t.sol \
+            --match-test testCompareAllActiveKeeperJobsAndSequencerBatch \
+            -vvvv 2>&1 | tee ../evidence-sky-keeper-impact/forge-test.log
 
       - name: Extract proof summary
         if: always()
         shell: bash
         run: |
           {
-            cat evidence-sky-ilk-registry-current/rpc.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|fork block|initial registry count|restored in one transaction|post-attack registry count|gas used|nonzero Art)' evidence-sky-ilk-registry-current/forge-test.log 2>/dev/null || true
-          } | tee evidence-sky-ilk-registry-current/summary.log
+            cat evidence-sky-keeper-impact/rpc.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|fork block|block gas limit|master network|active jobs|registry count|restored legacy|=== job index ===|job 0x|ok |canWork|gas |gas increase|gas decrease|sequencer batch|jobs with changed|maximum)' evidence-sky-keeper-impact/forge-test.log 2>/dev/null || true
+          } | tee evidence-sky-keeper-impact/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-current-mainnet-mass-readd
-          path: evidence-sky-ilk-registry-current/
+          name: sky-keeper-impact-after-mass-readd
+          path: evidence-sky-keeper-impact/
           if-no-files-found: error
           retention-days: 30
