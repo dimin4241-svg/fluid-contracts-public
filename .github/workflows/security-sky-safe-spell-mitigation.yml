@@ -1,0 +1,82 @@
+name: Security Sky safe spell mitigation control
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-safe-spell-mitigation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Run safe mitigation control with RPC failover
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence-sky-safe-spell-mitigation
+          endpoints=(
+            'https://mainnet.gateway.tenderly.co'
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://rpc.payload.de'
+            'https://eth-mainnet.public.blastapi.io'
+          )
+          forge build 2>&1 | tee ../evidence-sky-safe-spell-mitigation/forge-build.log
+          passed=0
+          : > ../evidence-sky-safe-spell-mitigation/all-attempts.log
+          for rpc in "${endpoints[@]}"; do
+            safe=$(echo "$rpc" | tr '/:.' '_')
+            log="../evidence-sky-safe-spell-mitigation/${safe}.log"
+            set +e
+            ETH_RPC_URL="$rpc" forge test --threads 1 \
+              --match-path src/IlkRegistrySafeSpellMitigation.t.sol \
+              --match-test testGovernanceCanBlockReAddByClearingPipWithoutBreakingExit \
+              -vvvv > "$log" 2>&1
+            rc=$?
+            set -e
+            {
+              echo "=== rpc=$rpc rc=$rc ==="
+              cat "$log"
+            } | tee -a ../evidence-sky-safe-spell-mitigation/all-attempts.log
+            if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
+              cp "$log" ../evidence-sky-safe-spell-mitigation/forge-test.log
+              echo "CASE_PASS safe-spell-mitigation rpc=$rpc" | tee ../evidence-sky-safe-spell-mitigation/summary.log
+              passed=1
+              break
+            fi
+            sleep 2
+          done
+          [[ $passed -eq 1 ]]
+          grep -E '(AAVE residual pip|AAVE Join Vat ward|AAVE Join live|AAVE Join custody|public re-add blocked|zero-amount exit still succeeds|PASS|Suite result)' \
+            ../evidence-sky-safe-spell-mitigation/forge-test.log \
+            | tee ../evidence-sky-safe-spell-mitigation/key-results.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-safe-spell-mitigation-control
+          path: evidence-sky-safe-spell-mitigation/
+          if-no-files-found: error
+          retention-days: 30
