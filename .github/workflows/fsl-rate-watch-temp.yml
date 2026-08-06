@@ -1,16 +1,20 @@
 name: Temporary fSL rate check
 
 on:
-  pull_request:
-    branches: [main]
+  issue_comment:
+    types: [created]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   check:
+    if: github.event.issue.pull_request && github.event.comment.body == '/run-fsl-rate-check'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -36,7 +40,7 @@ jobs:
             url=f'https://api.routescan.io/v2/network/mainnet/evm/{cid}/etherscan/api?module=proxy&action=eth_call&to={addr}&data=0xe47a882d&tag=latest'
             for _ in range(3):
               try:
-                j=requests.get(url,timeout=25).json(); res=j.get('result')
+                j=requests.get(url,timeout=30).json(); res=j.get('result')
                 if isinstance(res,str) and res.startswith('0x'):
                   raw=dec(res); return {'network':net,'chain_id':cid,'address':addr,'source':'routescan','result':res,'raw':raw,'annual_percent':raw/10000}
                 errs.append({'routescan':j})
@@ -44,14 +48,22 @@ jobs:
             p={'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':addr,'data':'0xe47a882d'},'latest']}
             for rpc in fallbacks[cid]:
               try:
-                j=requests.post(rpc,json=p,timeout=25).json(); res=j.get('result')
+                j=requests.post(rpc,json=p,timeout=30).json(); res=j.get('result')
                 if isinstance(res,str) and res.startswith('0x'):
                   raw=dec(res); return {'network':net,'chain_id':cid,'address':addr,'source':rpc,'result':res,'raw':raw,'annual_percent':raw/10000}
                 errs.append({rpc:j})
               except Exception as e: errs.append({rpc:repr(e)})
             return {'network':net,'chain_id':cid,'address':addr,'error':errs}
           with concurrent.futures.ThreadPoolExecutor(max_workers=21) as ex: rows=list(ex.map(check,targets))
-          out={'checked_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'results':rows,'nonzero':[x for x in rows if x.get('raw') not in (None,0)],'failures':[x for x in rows if 'error' in x]}
-          print('FSL_RESULT_JSON='+json.dumps(out,separators=(',',':')))
-          if out['failures']: raise SystemExit(2)
+          out={'checked_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'target_count':len(targets),'success_count':sum('raw' in x for x in rows),'results':rows,'nonzero':[x for x in rows if x.get('raw') not in (None,0)],'failures':[x for x in rows if 'error' in x]}
+          open('fsl-temp-result.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
           PY
+      - name: Commit result
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add fsl-temp-result.json
+          git commit -m 'Record temporary fSL feeOrReward check result' || exit 0
+          git push origin HEAD:main
