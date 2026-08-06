@@ -3,377 +3,260 @@ pragma solidity 0.8.21;
 
 import {Test} from "forge-std/Test.sol";
 
-interface IERC20ExactResidual {
-    function balanceOf(address account) external view returns (uint256);
+interface IERC20FeasibleV3 {
+    function balanceOf(address) external view returns (uint256);
 }
 
-interface IFactoryExactResidual {
-    function owner() external view returns (address);
-    function ownerOf(uint256 nftId) external view returns (address);
+interface IFactoryFeasibleV3 {
+    function ownerOf(uint256) external view returns (address);
 }
 
-interface IVaultExactResidual {
-    struct Tokens {
-        address token0;
-        address token1;
-    }
-
-    struct ConstantViews {
-        address liquidity;
-        address factory;
-        address operateImplementation;
-        address adminImplementation;
-        address secondaryImplementation;
-        address deployer;
-        address supply;
-        address borrow;
-        Tokens supplyToken;
-        Tokens borrowToken;
-        uint256 vaultId;
-        uint256 vaultType;
-        bytes32 supplyExchangePriceSlot;
-        bytes32 borrowExchangePriceSlot;
-        bytes32 userSupplySlot;
-        bytes32 userBorrowSlot;
-    }
-
-    function constantsView() external view returns (ConstantViews memory);
-
-    function operatePerfect(
-        uint256 nftId,
-        int256 perfectColShares,
-        int256 colToken0MinMax,
-        int256 colToken1MinMax,
-        int256 perfectDebtShares,
-        int256 debtToken0MinMax,
-        int256 debtToken1MinMax,
-        address to
-    ) external payable returns (uint256, int256[] memory);
-
-    function readFromStorage(bytes32 slot) external view returns (uint256);
+interface IVaultFeasibleV3 {
+    function operate(
+        uint256,
+        int256,
+        int256,
+        int256,
+        int256,
+        int256,
+        int256,
+        address
+    ) external payable returns (uint256, int256, int256);
 }
 
-/// @notice Temporary Windows-run wrapper for the exact three-control Smart Debt proof.
-/// It uses only real NFT positions and never writes debt shares or position storage.
+interface IOracleFeasibleV3 {
+    function getExchangeRateLiquidate() external view returns (uint256);
+}
+
 contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test is Test {
-    uint256 internal constant EXACT_FORK_BLOCK = 12_386_164;
-    address internal constant VAULT = 0x6e0cdb5c21b3c8e340e9c9210057035bafa86fff;
-    address internal constant SMART_DEBT_DEX = 0xbd5dd095d9a6565c8222bb36b5814953f1c46f71;
-    uint256 internal constant POSITION_SLOT = 3;
-    uint256 internal constant REPAY_FUNDING = 1e30;
-    int256 internal constant REPAY_LIMIT = -1e30;
+    address constant FACTORY = 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d;
+    address constant VAULT = 0x6E0cDB09eb33cD3894C905E0DFF9289b95a86FFF;
+    address constant ORACLE = 0x029E6fF2173ff6c9e61787Fa7A3cfF1117D957b6;
+    address constant GHO = 0xb77E872A68C62CfC0dFb02C067Ecc3DA23B4bbf3;
+    address constant USDT0 = 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb;
+    address constant BORROWER = 0x111111111111111111111111111111111111B077;
 
-    string internal rpcUrl;
-    address internal perturbReceiver;
+    uint256 constant COL_GHO = 2_000_000e18;
+    uint256 constant COL_USDT0 = 2_000_000e6;
 
-    struct CloseResult {
-        uint256 spent0;
-        uint256 spent1;
-        int256 burnedShares;
-        int256 returned0;
-        int256 returned1;
-        uint256 positionAfter;
+    bytes4 constant LIQ_RESULT = bytes4(keccak256("FluidLiquidateResult(uint256,uint256)"));
+    bytes4 constant VAULT_ERROR = bytes4(keccak256("FluidVaultError(uint256)"));
+
+    string rpcUrl;
+    uint256 forkBlock;
+
+    struct Sim {
+        bytes4 selector;
+        bool liquidatable;
+        uint256 col;
+        uint256 debt;
+        uint256 errorId;
     }
 
-    struct PerturbResult {
-        uint256 borrowed0;
-        uint256 borrowed1;
-        int256 mintedShares;
-        int256 returned0;
-        int256 returned1;
-        bytes32 slot2Before;
-        bytes32 slot2After;
-        bytes32 slot4Before;
-        bytes32 slot4After;
-    }
+    event FeasibleCase(
+        bool indexed borrowGho,
+        uint256 requestedAmount1e18,
+        bool success,
+        bytes4 revertSelector,
+        uint256 errorId,
+        bytes32 revertHash
+    );
 
     event FeasibleDeposit(
-        uint256 forkBlock,
-        address indexed vault,
-        address indexed factory,
-        address indexed smartDebtDex,
-        address debtToken0,
-        address debtToken1
+        bool indexed borrowGho,
+        uint256 requestedAmount1e18,
+        uint256 indexed nftId,
+        int256 collateralShares,
+        uint256 oracleAfterDeposit,
+        bytes4 simulationSelector,
+        uint256 simulationErrorId,
+        bool liquidatableBeforeBorrow
     );
 
     event FeasibleBorrow(
-        uint256 indexed donorNft,
-        uint256 perturbShares,
-        uint256 borrowed0,
-        uint256 borrowed1,
-        int256 mintedShares,
-        bytes32 slot2Before,
-        bytes32 slot2After,
-        bytes32 slot4Before,
-        bytes32 slot4After
+        bool indexed borrowGho,
+        uint256 requestedAmount1e18,
+        uint256 indexed nftId,
+        int256 debtShares,
+        uint256 receivedGho,
+        uint256 receivedUsdt0,
+        uint256 oracleBefore,
+        uint256 oracleAfter,
+        int256 oracleDeltaPpm
     );
 
-    event FeasibleCase(
-        uint256 indexed targetNft,
-        uint256 indexed donorNft,
-        uint256 perturbShares,
-        uint256 baselineSpent0,
-        uint256 baselineSpent1,
-        uint256 combinedSpent0,
-        uint256 combinedSpent1,
-        int256 residual0,
-        int256 residual1,
-        int256 closeCostDelta0,
-        int256 closeCostDelta1
+    event FeasibleLiquidation(
+        bool indexed borrowGho,
+        uint256 requestedAmount1e18,
+        uint256 indexed nftId,
+        bytes4 selector,
+        bool liquidatable,
+        uint256 colLiquidated,
+        uint256 debtLiquidated,
+        uint256 errorId,
+        bool eligibilityChanged
     );
 
     function setUp() public {
         rpcUrl = vm.envString("PLASMA_RPC_URL");
-        perturbReceiver = makeAddr("exact-smart-debt-perturb-receiver");
-        _freshFork();
+        forkBlock = vm.envUint("PLASMA_FORK_BLOCK");
+        vm.createSelectFork(rpcUrl, forkBlock);
+        assertEq(block.chainid, 9745);
+        assertEq(block.number, forkBlock);
+        assertGt(VAULT.code.length, 0);
     }
 
-    function _freshFork() internal {
-        vm.createSelectFork(rpcUrl, EXACT_FORK_BLOCK);
-        assertEq(block.chainid, 9745, "unexpected chain");
-        assertEq(block.number, EXACT_FORK_BLOCK, "fork drift");
-        assertGt(VAULT.code.length, 0, "vault has no code");
-        assertGt(SMART_DEBT_DEX.code.length, 0, "DEX has no code");
+    function _selector(bytes memory data) internal pure returns (bytes4 value) {
+        if (data.length < 4) return bytes4(0);
+        assembly ("memory-safe") {
+            value := mload(add(data, 0x20))
+        }
     }
 
-    function _constants() internal view returns (IVaultExactResidual.ConstantViews memory c) {
-        c = IVaultExactResidual(VAULT).constantsView();
-        assertEq(c.borrow, SMART_DEBT_DEX, "wrong Smart Debt DEX");
-        assertTrue(c.borrowToken.token0 != address(0), "missing debt token0");
-        assertTrue(c.borrowToken.token1 != address(0), "missing debt token1");
-        assertGt(c.factory.code.length, 0, "missing factory");
+    function _word(bytes memory data, uint256 index) internal pure returns (uint256 value) {
+        require(data.length >= 4 + (index + 1) * 32, "short data");
+        assembly ("memory-safe") {
+            value := mload(add(add(data, 0x24), mul(index, 0x20)))
+        }
     }
 
-    function _safeApprove(address token, uint256 amount) internal {
+    function _errorId(bytes memory data) internal pure returns (uint256) {
+        return data.length >= 36 ? _word(data, 0) : 0;
+    }
+
+    function _deltaPpm(uint256 afterValue, uint256 beforeValue) internal pure returns (int256) {
+        int256 delta = afterValue >= beforeValue
+            ? int256(afterValue - beforeValue)
+            : -int256(beforeValue - afterValue);
+        return delta * int256(1e6) / int256(beforeValue);
+    }
+
+    function _approve(address token) internal {
+        vm.prank(BORROWER);
         (bool ok, bytes memory data) = token.call(
-            abi.encodeWithSignature("approve(address,uint256)", VAULT, amount)
+            abi.encodeWithSignature("approve(address,uint256)", VAULT, type(uint256).max)
         );
-        require(ok && (data.length == 0 || abi.decode(data, (bool))), "APPROVE_FAILED");
+        require(ok && (data.length == 0 || abi.decode(data, (bool))), "approve failed");
     }
 
-    function _toInt(uint256 value) internal pure returns (int256) {
-        require(value <= uint256(type(int256).max), "int256 overflow");
-        return int256(value);
-    }
-
-    function _signedDelta(uint256 after_, uint256 before_) internal pure returns (int256) {
-        return after_ >= before_ ? _toInt(after_ - before_) : -_toInt(before_ - after_);
-    }
-
-    function _position(IVaultExactResidual.ConstantViews memory c, uint256 nftId)
-        internal
-        returns (uint256 value)
-    {
-        address factoryOwner = IFactoryExactResidual(c.factory).owner();
-        vm.prank(factoryOwner);
-        value = IVaultExactResidual(VAULT).readFromStorage(
-            keccak256(abi.encode(nftId, POSITION_SLOT))
+    function _simulate() internal returns (Sim memory result) {
+        (bool ok, bytes memory data) = VAULT.call(
+            abi.encodeWithSignature("simulateLiquidate(uint256,bool)", type(uint256).max, false)
         );
+        require(!ok, "simulation unexpectedly returned");
+        result.selector = _selector(data);
+        if (result.selector == LIQ_RESULT && data.length >= 68) {
+            result.liquidatable = true;
+            result.col = _word(data, 0);
+            result.debt = _word(data, 1);
+        } else if (result.selector == VAULT_ERROR && data.length >= 36) {
+            result.errorId = _word(data, 0);
+        }
     }
 
-    function _prepareOwner(IVaultExactResidual.ConstantViews memory c, uint256 nftId)
-        internal
-        returns (address owner)
-    {
-        owner = IFactoryExactResidual(c.factory).ownerOf(nftId);
-        assertTrue(owner != address(0), "missing owner");
-        deal(owner, 100 ether);
-        deal(c.borrowToken.token0, owner, REPAY_FUNDING, true);
-        deal(c.borrowToken.token1, owner, REPAY_FUNDING, true);
-        vm.startPrank(owner);
-        _safeApprove(c.borrowToken.token0, type(uint256).max);
-        _safeApprove(c.borrowToken.token1, type(uint256).max);
-        vm.stopPrank();
-    }
+    function executeFeasibleCase(bool borrowGho, uint256 requestedAmount1e18) external {
+        require(msg.sender == address(this), "self only");
 
-    function _fullClose(IVaultExactResidual.ConstantViews memory c, uint256 nftId)
-        internal
-        returns (CloseResult memory result)
-    {
-        uint256 beforePosition = _position(c, nftId);
-        assertTrue(beforePosition != 0 && (beforePosition & 1) == 0, "target has no live debt");
+        deal(GHO, BORROWER, COL_GHO);
+        deal(USDT0, BORROWER, COL_USDT0);
+        _approve(GHO);
+        _approve(USDT0);
 
-        address owner = _prepareOwner(c, nftId);
-        uint256 balance0Before = IERC20ExactResidual(c.borrowToken.token0).balanceOf(owner);
-        uint256 balance1Before = IERC20ExactResidual(c.borrowToken.token1).balanceOf(owner);
+        vm.prank(BORROWER);
+        (uint256 nftId, int256 colShares, int256 initialDebtShares) = IVaultFeasibleV3(VAULT).operate(
+            0,
+            int256(COL_GHO),
+            int256(COL_USDT0),
+            1,
+            0,
+            0,
+            0,
+            BORROWER
+        );
+        require(initialDebtShares == 0, "initial debt");
+        require(IFactoryFeasibleV3(FACTORY).ownerOf(nftId) == BORROWER, "owner mismatch");
 
-        vm.prank(owner);
-        (, int256[] memory r) = IVaultExactResidual(VAULT).operatePerfect(
+        uint256 oracleAfterDeposit = IOracleFeasibleV3(ORACLE).getExchangeRateLiquidate();
+        Sim memory beforeBorrow = _simulate();
+        emit FeasibleDeposit(
+            borrowGho,
+            requestedAmount1e18,
+            nftId,
+            colShares,
+            oracleAfterDeposit,
+            beforeBorrow.selector,
+            beforeBorrow.errorId,
+            beforeBorrow.liquidatable
+        );
+
+        uint256 ghoBefore = IERC20FeasibleV3(GHO).balanceOf(BORROWER);
+        uint256 usdtBefore = IERC20FeasibleV3(USDT0).balanceOf(BORROWER);
+
+        vm.prank(BORROWER);
+        (, int256 noColShares, int256 debtShares) = IVaultFeasibleV3(VAULT).operate(
             nftId,
             0,
             0,
             0,
-            type(int256).min,
-            REPAY_LIMIT,
-            REPAY_LIMIT,
-            owner
+            borrowGho ? int256(requestedAmount1e18) : int256(0),
+            borrowGho ? int256(0) : int256(requestedAmount1e18 / 1e12),
+            type(int256).max,
+            BORROWER
         );
+        require(noColShares == 0, "unexpected collateral change");
+        require(debtShares > 0, "no debt shares");
 
-        assertEq(r.length, 6, "unexpected close return length");
-        uint256 balance0After = IERC20ExactResidual(c.borrowToken.token0).balanceOf(owner);
-        uint256 balance1After = IERC20ExactResidual(c.borrowToken.token1).balanceOf(owner);
-        result.spent0 = balance0Before - balance0After;
-        result.spent1 = balance1Before - balance1After;
-        result.burnedShares = r[3];
-        result.returned0 = r[4];
-        result.returned1 = r[5];
-        result.positionAfter = _position(c, nftId);
-
-        assertEq(result.positionAfter & 1, 1, "full close left live debt");
-        assertLt(result.burnedShares, 0, "full close did not burn shares");
-        assertLe(result.returned0, 0, "close token0 positive");
-        assertLe(result.returned1, 0, "close token1 positive");
-        assertEq(uint256(-result.returned0), result.spent0, "close token0 mismatch");
-        assertEq(uint256(-result.returned1), result.spent1, "close token1 mismatch");
-    }
-
-    function _perturb(
-        IVaultExactResidual.ConstantViews memory c,
-        uint256 donorNft,
-        uint256 perturbShares
-    ) internal returns (PerturbResult memory result) {
-        uint256 donorPosition = _position(c, donorNft);
-        assertTrue(donorPosition != 0 && (donorPosition & 1) == 0, "donor has no live debt");
-
-        address owner = IFactoryExactResidual(c.factory).ownerOf(donorNft);
-        assertTrue(owner != address(0), "missing donor owner");
-        deal(owner, 100 ether);
-
-        uint256 balance0Before = IERC20ExactResidual(c.borrowToken.token0).balanceOf(perturbReceiver);
-        uint256 balance1Before = IERC20ExactResidual(c.borrowToken.token1).balanceOf(perturbReceiver);
-        result.slot2Before = vm.load(SMART_DEBT_DEX, bytes32(uint256(2)));
-        result.slot4Before = vm.load(SMART_DEBT_DEX, bytes32(uint256(4)));
-
-        vm.prank(owner);
-        (, int256[] memory r) = IVaultExactResidual(VAULT).operatePerfect(
-            donorNft,
-            0,
-            0,
-            0,
-            int256(perturbShares),
-            1,
-            1,
-            perturbReceiver
-        );
-
-        assertEq(r.length, 6, "unexpected perturb return length");
-        result.borrowed0 = IERC20ExactResidual(c.borrowToken.token0).balanceOf(perturbReceiver) - balance0Before;
-        result.borrowed1 = IERC20ExactResidual(c.borrowToken.token1).balanceOf(perturbReceiver) - balance1Before;
-        result.mintedShares = r[3];
-        result.returned0 = r[4];
-        result.returned1 = r[5];
-        result.slot2After = vm.load(SMART_DEBT_DEX, bytes32(uint256(2)));
-        result.slot4After = vm.load(SMART_DEBT_DEX, bytes32(uint256(4)));
-
-        assertEq(uint256(result.mintedShares), perturbShares, "wrong perturb shares");
-        assertEq(uint256(result.returned0), result.borrowed0, "perturb token0 mismatch");
-        assertEq(uint256(result.returned1), result.borrowed1, "perturb token1 mismatch");
-        assertGt(result.borrowed0 + result.borrowed1, 0, "zero perturb output");
-    }
-
-    function _baseline(uint256 targetNft) internal returns (CloseResult memory result) {
-        _freshFork();
-        result = _fullClose(_constants(), targetNft);
-    }
-
-    function _perturbOnly(uint256 donorNft, uint256 perturbShares)
-        internal
-        returns (PerturbResult memory result)
-    {
-        _freshFork();
-        result = _perturb(_constants(), donorNft, perturbShares);
+        uint256 oracleAfterBorrow = IOracleFeasibleV3(ORACLE).getExchangeRateLiquidate();
         emit FeasibleBorrow(
-            donorNft,
-            perturbShares,
-            result.borrowed0,
-            result.borrowed1,
-            result.mintedShares,
-            result.slot2Before,
-            result.slot2After,
-            result.slot4Before,
-            result.slot4After
+            borrowGho,
+            requestedAmount1e18,
+            nftId,
+            debtShares,
+            IERC20FeasibleV3(GHO).balanceOf(BORROWER) - ghoBefore,
+            IERC20FeasibleV3(USDT0).balanceOf(BORROWER) - usdtBefore,
+            oracleAfterDeposit,
+            oracleAfterBorrow,
+            _deltaPpm(oracleAfterBorrow, oracleAfterDeposit)
         );
-    }
 
-    function _combined(uint256 targetNft, uint256 donorNft, uint256 perturbShares)
-        internal
-        returns (PerturbResult memory perturbResult, CloseResult memory closeResult)
-    {
-        _freshFork();
-        IVaultExactResidual.ConstantViews memory c = _constants();
-        perturbResult = _perturb(c, donorNft, perturbShares);
-        closeResult = _fullClose(c, targetNft);
-    }
-
-    function _assertSame(PerturbResult memory a, PerturbResult memory b) internal pure {
-        require(a.borrowed0 == b.borrowed0, "different perturb token0");
-        require(a.borrowed1 == b.borrowed1, "different perturb token1");
-        require(a.mintedShares == b.mintedShares, "different perturb shares");
-        require(a.returned0 == b.returned0, "different perturb return0");
-        require(a.returned1 == b.returned1, "different perturb return1");
-        require(a.slot2Before == b.slot2Before, "different slot2 before");
-        require(a.slot2After == b.slot2After, "different slot2 after");
-        require(a.slot4Before == b.slot4Before, "different slot4 before");
-        require(a.slot4After == b.slot4After, "different slot4 after");
-    }
-
-    function _probe(uint256 targetNft, uint256 donorNft, uint256 perturbShares) internal {
-        assertTrue(targetNft != donorNft, "target equals donor");
-        CloseResult memory baseline = _baseline(targetNft);
-        PerturbResult memory perturbOnly = _perturbOnly(donorNft, perturbShares);
-        (PerturbResult memory combinedPerturb, CloseResult memory combinedClose) =
-            _combined(targetNft, donorNft, perturbShares);
-
-        _assertSame(perturbOnly, combinedPerturb);
-        assertEq(combinedClose.burnedShares, baseline.burnedShares, "target shares changed");
-
-        int256 baselineNet0 = -_toInt(baseline.spent0);
-        int256 baselineNet1 = -_toInt(baseline.spent1);
-        int256 perturbOnlyNet0 = _toInt(perturbOnly.borrowed0);
-        int256 perturbOnlyNet1 = _toInt(perturbOnly.borrowed1);
-        int256 combinedNet0 = _toInt(combinedPerturb.borrowed0) - _toInt(combinedClose.spent0);
-        int256 combinedNet1 = _toInt(combinedPerturb.borrowed1) - _toInt(combinedClose.spent1);
-        int256 residual0 = combinedNet0 - baselineNet0 - perturbOnlyNet0;
-        int256 residual1 = combinedNet1 - baselineNet1 - perturbOnlyNet1;
-        int256 closeCostDelta0 = _signedDelta(combinedClose.spent0, baseline.spent0);
-        int256 closeCostDelta1 = _signedDelta(combinedClose.spent1, baseline.spent1);
-
-        assertEq(residual0, -closeCostDelta0, "token0 residual algebra mismatch");
-        assertEq(residual1, -closeCostDelta1, "token1 residual algebra mismatch");
-
-        emit FeasibleCase(
-            targetNft,
-            donorNft,
-            perturbShares,
-            baseline.spent0,
-            baseline.spent1,
-            combinedClose.spent0,
-            combinedClose.spent1,
-            residual0,
-            residual1,
-            closeCostDelta0,
-            closeCostDelta1
+        Sim memory afterBorrow = _simulate();
+        emit FeasibleLiquidation(
+            borrowGho,
+            requestedAmount1e18,
+            nftId,
+            afterBorrow.selector,
+            afterBorrow.liquidatable,
+            afterBorrow.col,
+            afterBorrow.debt,
+            afterBorrow.errorId,
+            beforeBorrow.liquidatable != afterBorrow.liquidatable
         );
     }
 
     function test_feasibleOneSidedBorrowLiquidation() public {
-        IVaultExactResidual.ConstantViews memory c = _constants();
-        emit FeasibleDeposit(
-            block.number,
-            VAULT,
-            c.factory,
-            c.borrow,
-            c.borrowToken.token0,
-            c.borrowToken.token1
-        );
+        uint256[4] memory sizes = [
+            uint256(100_000e18),
+            uint256(500_000e18),
+            uint256(1_000_000e18),
+            uint256(1_500_000e18)
+        ];
 
-        uint256[4] memory targets = [uint256(2770), uint256(2887), uint256(2869), uint256(2725)];
-        uint256[4] memory donors = [uint256(2887), uint256(2770), uint256(2887), uint256(2770)];
-        uint256[2] memory perturbSizes = [uint256(1e18), uint256(1e19)];
-
-        for (uint256 i; i < targets.length; ++i) {
-            for (uint256 j; j < perturbSizes.length; ++j) {
-                _probe(targets[i], donors[i], perturbSizes[j]);
+        for (uint256 direction; direction < 2; ++direction) {
+            bool borrowGho = direction == 0;
+            for (uint256 i; i < sizes.length; ++i) {
+                vm.createSelectFork(rpcUrl, forkBlock);
+                (bool ok, bytes memory reason) = address(this).call(
+                    abi.encodeCall(this.executeFeasibleCase, (borrowGho, sizes[i]))
+                );
+                emit FeasibleCase(
+                    borrowGho,
+                    sizes[i],
+                    ok,
+                    ok ? bytes4(0) : _selector(reason),
+                    ok ? 0 : _errorId(reason),
+                    ok ? bytes32(0) : keccak256(reason)
+                );
+                require(ok, "corrected stateful case failed");
             }
         }
     }
