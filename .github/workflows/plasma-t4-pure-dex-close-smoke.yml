@@ -1,0 +1,51 @@
+name: Plasma T4 fork smoke
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-exact-debt-controls-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4PureDexDebtCloseSmoke.t.sol'
+      - '.github/workflows/plasma-t4-pure-dex-close-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fork-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated test
+        run: |
+          rm -rf audit/t4-pure-dex-smoke
+          mkdir -p audit/t4-pure-dex-smoke/test audit/t4-pure-dex-smoke/lib evidence
+          cp test/security/PlasmaVaultT4PureDexDebtCloseSmoke.t.sol audit/t4-pure-dex-smoke/test/
+          cp -R lib/forge-std audit/t4-pure-dex-smoke/lib/forge-std
+      - name: Run pinned fork test
+        run: |
+          set -o pipefail
+          forge test --root audit/t4-pure-dex-smoke --via-ir --match-path test/PlasmaVaultT4PureDexDebtCloseSmoke.t.sol -vvvv 2>&1 | tee evidence/smoke.log
+      - name: Summarize
+        if: always()
+        run: |
+          grep -E '(SmokeSurface|SmokeBaseline|SmokePerturb|SmokeInteraction)\(|Suite result|Failing tests|Error:|revert' evidence/smoke.log | tee evidence/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence/block.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-pure-dex-close-smoke
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
