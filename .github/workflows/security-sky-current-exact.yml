@@ -1,0 +1,88 @@
+name: Security Sky exact current adapter proof
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-current-exact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-current-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Select archive Ethereum RPC
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-sky-current-exact
+          endpoints=(
+            'https://eth-mainnet.public.blastapi.io'
+            'https://mainnet.gateway.tenderly.co'
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://rpc.payload.de'
+          )
+          for rpc in "${endpoints[@]}"; do
+            stable=1
+            for attempt in 1 2; do
+              if ! output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block 25694337 --rpc-url "$rpc" 2>&1); then
+                stable=0
+                echo "$rpc attempt=$attempt failed: $output" | tee -a evidence-sky-current-exact/rpc.log
+                break
+              fi
+              echo "$rpc attempt=$attempt count=$output" | tee -a evidence-sky-current-exact/rpc.log
+              [[ "$output" =~ ^35 ]] || stable=0
+            done
+            if [[ "$stable" == 1 ]]; then
+              echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
+              echo "selected=$rpc" | tee -a evidence-sky-current-exact/rpc.log
+              exit 0
+            fi
+          done
+          exit 1
+
+      - name: Run exact positive and negative proofs
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -o pipefail
+          forge test \
+            --match-path src/IlkRegistryCurrentMassReAdd.t.sol \
+            -vvvv 2>&1 | tee ../evidence-sky-current-exact/forge-test.log
+
+      - name: Extract proof summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            cat evidence-sky-current-exact/rpc.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|fork block|initial registry count|restored in one transaction|post-attack registry count|gas used|nonzero Art|RWA012|RWA013|invalid-auction-contract)' evidence-sky-current-exact/forge-test.log 2>/dev/null || true
+          } | tee evidence-sky-current-exact/summary.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-exact-current-adapter-proof
+          path: evidence-sky-current-exact/
+          if-no-files-found: error
+          retention-days: 30
