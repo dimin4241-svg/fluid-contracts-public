@@ -22,6 +22,19 @@ contract PlasmaVaultT4PositionsTest is Test {
     uint256 internal constant VAULT_POSITION_DATA_SLOT = 3;
     uint256 internal constant T4_ENCODED_TYPE = 40_000;
 
+    struct Target {
+        uint256 vaultId;
+        address vault;
+        uint256 configuredPositions;
+    }
+
+    struct Counts {
+        uint256 factoryNfts;
+        uint256 nonzeroPositions;
+        uint256 borrowPositions;
+        uint256 supplyOnlyPositions;
+    }
+
     event T4Target(
         uint256 indexed vaultId,
         address indexed vault,
@@ -48,9 +61,7 @@ contract PlasmaVaultT4PositionsTest is Test {
         uint256 factoryNfts,
         uint256 nonzeroPositions,
         uint256 borrowPositions,
-        uint256 supplyOnlyPositions,
-        uint256 largestRawSupplyNft,
-        uint256 largestRawSupply
+        uint256 supplyOnlyPositions
     );
 
     function setUp() public {
@@ -61,26 +72,39 @@ contract PlasmaVaultT4PositionsTest is Test {
     function test_inventoryRealT4BorrowPositions() public {
         IPlasmaVaultFactoryPositions factory = IPlasmaVaultFactoryPositions(FACTORY);
         address factoryOwner = factory.owner();
+        Target memory target = _findTarget(factory, factoryOwner);
+
+        assertEq(target.vaultId, 33, "unexpected T4 vault id");
+        assertEq(target.vault, 0x6E0cDB09eb33cD3894C905E0DFF9289b95a86FFF, "unexpected T4 vault");
+
+        Counts memory counts = _scanPositions(factory, factoryOwner, target);
+        emit PositionSummary(
+            target.vaultId,
+            target.configuredPositions,
+            counts.factoryNfts,
+            counts.nonzeroPositions,
+            counts.borrowPositions,
+            counts.supplyOnlyPositions
+        );
+
+        assertEq(counts.nonzeroPositions, target.configuredPositions, "position count mismatch");
+        assertGt(counts.borrowPositions, 0, "no live T4 debt positions");
+    }
+
+    function _findTarget(IPlasmaVaultFactoryPositions factory, address factoryOwner)
+        internal returns (Target memory target)
+    {
         uint256 totalVaults = factory.totalVaults();
-
-        uint256 targetVaultId;
-        address targetVault;
-        uint256 configuredPositions;
-
         for (uint256 vaultId = 1; vaultId <= totalVaults; ++vaultId) {
             address vault = factory.getVaultAddress(vaultId);
             (bool ok, bytes memory data) = vault.staticcall(abi.encodeWithSignature("constantsView()"));
             assertTrue(ok, "constantsView failed");
-
             if (data.length != 18 * 32 || _word(data, 13) != T4_ENCODED_TYPE) continue;
-            assertEq(targetVault, address(0), "more than one T4 target");
-
-            targetVaultId = vaultId;
-            targetVault = vault;
+            assertEq(target.vault, address(0), "more than one T4 target");
 
             vm.prank(factoryOwner);
             uint256 vars = IPlasmaVaultPositionStorage(vault).readFromStorage(bytes32(uint256(0)));
-            configuredPositions = (vars >> 210) & type(uint32).max;
+            target = Target(vaultId, vault, (vars >> 210) & type(uint32).max);
 
             emit T4Target(
                 vaultId,
@@ -91,76 +115,63 @@ contract PlasmaVaultT4PositionsTest is Test {
                 address(uint160(_word(data, 9))),
                 address(uint160(_word(data, 10))),
                 address(uint160(_word(data, 11))),
-                configuredPositions
+                target.configuredPositions
             );
         }
+    }
 
-        assertEq(targetVaultId, 33, "unexpected T4 vault id");
-        assertEq(targetVault, 0x6E0cDB09eb33cD3894C905E0DFF9289b95a86FFF, "unexpected T4 vault");
-
-        uint256 factoryNfts;
-        uint256 nonzeroPositions;
-        uint256 borrowPositions;
-        uint256 supplyOnlyPositions;
-        uint256 largestRawSupplyNft;
-        uint256 largestRawSupply;
+    function _scanPositions(
+        IPlasmaVaultFactoryPositions factory,
+        address factoryOwner,
+        Target memory target
+    ) internal returns (Counts memory counts) {
         uint256 maxNftId = factory.totalSupply();
-
         for (uint256 nftId = 1; nftId <= maxNftId; ++nftId) {
-            bytes32 tokenConfigSlot = keccak256(abi.encode(nftId, FACTORY_TOKEN_CONFIG_SLOT));
             vm.prank(factoryOwner);
-            uint256 tokenConfig = factory.readFromStorage(tokenConfigSlot);
-            uint256 vaultId = (tokenConfig >> 192) & type(uint32).max;
-            if (vaultId != targetVaultId) continue;
+            uint256 tokenConfig = factory.readFromStorage(
+                keccak256(abi.encode(nftId, FACTORY_TOKEN_CONFIG_SLOT))
+            );
+            if (((tokenConfig >> 192) & type(uint32).max) != target.vaultId) continue;
 
-            ++factoryNfts;
-            bytes32 positionSlot = keccak256(abi.encode(nftId, VAULT_POSITION_DATA_SLOT));
+            ++counts.factoryNfts;
             vm.prank(factoryOwner);
-            uint256 positionData = IPlasmaVaultPositionStorage(targetVault).readFromStorage(positionSlot);
+            uint256 positionData = IPlasmaVaultPositionStorage(target.vault).readFromStorage(
+                keccak256(abi.encode(nftId, VAULT_POSITION_DATA_SLOT))
+            );
             if (positionData == 0) continue;
 
-            ++nonzeroPositions;
-            bool supplyOnly = (positionData & 1) == 1;
-            uint256 rawSupply = (positionData >> 45) & type(uint64).max;
-            uint256 dustDebt = (positionData >> 109) & type(uint64).max;
-
-            if (supplyOnly) {
-                ++supplyOnlyPositions;
+            ++counts.nonzeroPositions;
+            if ((positionData & 1) == 1) {
+                ++counts.supplyOnlyPositions;
                 continue;
             }
 
-            ++borrowPositions;
-            uint256 absTick = (positionData >> 2) & ((1 << 19) - 1);
-            int256 tick = ((positionData >> 1) & 1) == 1 ? int256(absTick) : -int256(absTick);
-            uint256 tickId = (positionData >> 21) & ((1 << 24) - 1);
-            address positionOwner = factory.ownerOf(nftId);
-
-            if (rawSupply > largestRawSupply) {
-                largestRawSupply = rawSupply;
-                largestRawSupplyNft = nftId;
-            }
-
-            emit BorrowPosition(nftId, positionOwner, tick, tickId, rawSupply, dustDebt, positionData);
+            ++counts.borrowPositions;
+            _emitBorrowPosition(factory, nftId, positionData);
         }
+    }
 
-        emit PositionSummary(
-            targetVaultId,
-            configuredPositions,
-            factoryNfts,
-            nonzeroPositions,
-            borrowPositions,
-            supplyOnlyPositions,
-            largestRawSupplyNft,
-            largestRawSupply
+    function _emitBorrowPosition(
+        IPlasmaVaultFactoryPositions factory,
+        uint256 nftId,
+        uint256 positionData
+    ) internal {
+        uint256 absTick = (positionData >> 2) & ((1 << 19) - 1);
+        int256 tick = ((positionData >> 1) & 1) == 1 ? int256(absTick) : -int256(absTick);
+        emit BorrowPosition(
+            nftId,
+            factory.ownerOf(nftId),
+            tick,
+            (positionData >> 21) & ((1 << 24) - 1),
+            (positionData >> 45) & type(uint64).max,
+            (positionData >> 109) & type(uint64).max,
+            positionData
         );
-
-        assertEq(nonzeroPositions, configuredPositions, "position count mismatch");
-        assertGt(borrowPositions, 0, "no live T4 debt positions");
     }
 
     function _word(bytes memory data, uint256 index) internal pure returns (uint256 value) {
         require(data.length >= (index + 1) * 32, "word out of bounds");
-        assembly {
+        assembly ("memory-safe") {
             value := mload(add(add(data, 0x20), mul(index, 0x20)))
         }
     }
