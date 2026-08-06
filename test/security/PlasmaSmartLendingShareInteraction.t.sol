@@ -19,12 +19,12 @@ interface IFluidSmartLendingShareProbe {
     function exchangePrice() external view returns (uint184);
     function rebalanceDiff() external view returns (int256);
 
-    function depositPerfect(
-        uint256 shares,
-        uint256 maxToken0Deposit,
-        uint256 maxToken1Deposit,
+    function deposit(
+        uint256 token0Amt,
+        uint256 token1Amt,
+        uint256 minSharesAmt,
         address to
-    ) external payable returns (uint256 amount, uint256 token0Amt, uint256 token1Amt);
+    ) external payable returns (uint256 amount, uint256 shares);
 
     function withdrawPerfect(
         uint256 shares,
@@ -60,8 +60,7 @@ contract PlasmaSmartLendingShareInteractionTest is Test {
         uint256 token1SpentInPerturb;
         uint256 token0SpentInReverse;
         uint256 wrapperMinted;
-        uint256 token0Deposit;
-        uint256 token1Deposit;
+        uint256 dexSharesReceived;
         uint256 token0Withdraw;
         uint256 token1Withdraw;
         int256 rebalanceDiffBefore;
@@ -79,15 +78,15 @@ contract PlasmaSmartLendingShareInteractionTest is Test {
     );
 
     event ScenarioResult(
-        uint256 indexed requestedDexShares,
+        uint256 indexed positionToken0,
+        uint256 indexed positionToken1,
         Scenario indexed scenario,
         int256 token0Delta,
         int256 token1Delta,
         uint256 token1SpentInPerturb,
         uint256 token0SpentInReverse,
         uint256 wrapperMinted,
-        uint256 token0Deposit,
-        uint256 token1Deposit,
+        uint256 dexSharesReceived,
         uint256 token0Withdraw,
         uint256 token1Withdraw,
         int256 rebalanceDiffBefore,
@@ -96,7 +95,8 @@ contract PlasmaSmartLendingShareInteractionTest is Test {
     );
 
     event InteractionResult(
-        uint256 indexed requestedDexShares,
+        uint256 indexed positionToken0,
+        uint256 indexed positionToken1,
         int256 interactionToken0,
         int256 interactionToken1,
         int256 combinedToken0Delta,
@@ -154,7 +154,11 @@ contract PlasmaSmartLendingShareInteractionTest is Test {
         );
     }
 
-    function _runScenario(uint256 requestedDexShares, Scenario scenario) internal returns (Result memory result) {
+    function _runScenario(
+        uint256 positionToken0,
+        uint256 positionToken1,
+        Scenario scenario
+    ) internal returns (Result memory result) {
         _prepare();
 
         IFluidSmartLendingShareProbe wrapper = IFluidSmartLendingShareProbe(WRAPPER);
@@ -164,13 +168,14 @@ contract PlasmaSmartLendingShareInteractionTest is Test {
         uint256 gasBefore = gasleft();
 
         if (scenario != Scenario.PerturbOnly) {
-            (result.wrapperMinted, result.token0Deposit, result.token1Deposit) = wrapper.depositPerfect(
-                requestedDexShares,
-                type(uint256).max,
-                type(uint256).max,
+            (result.wrapperMinted, result.dexSharesReceived) = wrapper.deposit(
+                positionToken0,
+                positionToken1,
+                1,
                 address(this)
             );
             assertGt(result.wrapperMinted, 0, "no wrapper shares minted");
+            assertGt(result.dexSharesReceived, 0, "no dex shares received");
         }
 
         if (scenario != Scenario.WrapperOnly) {
@@ -201,15 +206,15 @@ contract PlasmaSmartLendingShareInteractionTest is Test {
         );
 
         emit ScenarioResult(
-            requestedDexShares,
+            positionToken0,
+            positionToken1,
             scenario,
             result.token0Delta,
             result.token1Delta,
             result.token1SpentInPerturb,
             result.token0SpentInReverse,
             result.wrapperMinted,
-            result.token0Deposit,
-            result.token1Deposit,
+            result.dexSharesReceived,
             result.token0Withdraw,
             result.token1Withdraw,
             result.rebalanceDiffBefore,
@@ -230,18 +235,32 @@ contract PlasmaSmartLendingShareInteractionTest is Test {
             PERTURB_AMOUNT_OUT0_EACH
         );
 
-        uint256[3] memory requestedDexShares = [uint256(1e18), uint256(1e21), uint256(1e23)];
+        uint256[3] memory token0Positions = [uint256(1 ether), uint256(1_000 ether), uint256(100_000 ether)];
+        uint256[3] memory token1Positions = [uint256(1e6), uint256(1_000e6), uint256(100_000e6)];
 
-        for (uint256 i; i < requestedDexShares.length; ++i) {
-            Result memory perturbOnly = _runScenario(requestedDexShares[i], Scenario.PerturbOnly);
-            Result memory wrapperOnly = _runScenario(requestedDexShares[i], Scenario.WrapperOnly);
-            Result memory combined = _runScenario(requestedDexShares[i], Scenario.WrapperAndPerturb);
+        for (uint256 i; i < token0Positions.length; ++i) {
+            Result memory perturbOnly = _runScenario(
+                token0Positions[i],
+                token1Positions[i],
+                Scenario.PerturbOnly
+            );
+            Result memory wrapperOnly = _runScenario(
+                token0Positions[i],
+                token1Positions[i],
+                Scenario.WrapperOnly
+            );
+            Result memory combined = _runScenario(
+                token0Positions[i],
+                token1Positions[i],
+                Scenario.WrapperAndPerturb
+            );
 
             int256 interaction0 = combined.token0Delta - wrapperOnly.token0Delta - perturbOnly.token0Delta;
             int256 interaction1 = combined.token1Delta - wrapperOnly.token1Delta - perturbOnly.token1Delta;
 
             emit InteractionResult(
-                requestedDexShares[i],
+                token0Positions[i],
+                token1Positions[i],
                 interaction0,
                 interaction1,
                 combined.token0Delta,
