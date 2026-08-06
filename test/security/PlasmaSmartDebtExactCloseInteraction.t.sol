@@ -66,6 +66,7 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
     int256 internal constant REPAY_LIMIT = -1e30;
 
     string internal rpcUrl;
+    address internal perturbReceiver;
 
     struct CloseResult {
         uint256 spent0;
@@ -82,7 +83,9 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
         int256 mintedShares;
         int256 returnedDebt0;
         int256 returnedDebt1;
+        bytes32 dexSlot2Before;
         bytes32 dexSlot2After;
+        bytes32 dexSlot4Before;
         bytes32 dexSlot4After;
     }
 
@@ -123,6 +126,8 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
         uint256 indexed targetNft,
         uint256 indexed donorNft,
         uint256 perturbShares,
+        uint256 borrowed0,
+        uint256 borrowed1,
         uint256 spent0,
         uint256 spent1,
         int256 burnedShares,
@@ -131,22 +136,25 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
         uint256 positionDataAfter
     );
 
-    event ExactInteraction(
+    event ExactThreeControlResidual(
         uint256 indexed targetNft,
         uint256 indexed donorNft,
         uint256 perturbShares,
-        uint256 baselineSpent0,
-        uint256 baselineSpent1,
-        uint256 perturbedSpent0,
-        uint256 perturbedSpent1,
-        int256 rawInteraction0,
-        int256 rawInteraction1,
-        uint256 perturbBorrowed0,
-        uint256 perturbBorrowed1
+        int256 baselineNet0,
+        int256 baselineNet1,
+        int256 perturbOnlyNet0,
+        int256 perturbOnlyNet1,
+        int256 combinedNet0,
+        int256 combinedNet1,
+        int256 residual0,
+        int256 residual1,
+        int256 closeCostDelta0,
+        int256 closeCostDelta1
     );
 
     function setUp() public {
         rpcUrl = vm.envString("PLASMA_RPC_URL");
+        perturbReceiver = makeAddr("smart-debt-perturb-receiver");
         uint256 suppliedBlock = vm.envOr("PLASMA_FORK_BLOCK", EXACT_FORK_BLOCK);
         assertEq(suppliedBlock, EXACT_FORK_BLOCK, "wrong fork block");
         _freshFork();
@@ -178,8 +186,13 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
         require(ok && (data.length == 0 || abi.decode(data, (bool))), "APPROVE_FAILED");
     }
 
+    function _toInt(uint256 value) internal pure returns (int256) {
+        require(value <= uint256(type(int256).max), "int256 overflow");
+        return int256(value);
+    }
+
     function _signedDelta(uint256 after_, uint256 before_) internal pure returns (int256) {
-        return after_ >= before_ ? int256(after_ - before_) : -int256(before_ - after_);
+        return after_ >= before_ ? _toInt(after_ - before_) : -_toInt(before_ - after_);
     }
 
     function _positionData(
@@ -243,6 +256,8 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
 
         assertEq(result.positionDataAfter & 1, 1, "full close left live debt");
         assertLt(result.burnedShares, 0, "full close did not burn shares");
+        assertLe(result.returnedDebt0, 0, "token0 close returned positive amount");
+        assertLe(result.returnedDebt1, 0, "token1 close returned positive amount");
         assertEq(uint256(-result.returnedDebt0), result.spent0, "token0 close mismatch");
         assertEq(uint256(-result.returnedDebt1), result.spent1, "token1 close mismatch");
     }
@@ -259,8 +274,12 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
         assertTrue(owner != address(0), "missing donor owner");
         deal(owner, 100 ether);
 
-        uint256 balance0Before = IERC20SmartDebtExact(c.borrowToken.token0).balanceOf(owner);
-        uint256 balance1Before = IERC20SmartDebtExact(c.borrowToken.token1).balanceOf(owner);
+        uint256 balance0Before =
+            IERC20SmartDebtExact(c.borrowToken.token0).balanceOf(perturbReceiver);
+        uint256 balance1Before =
+            IERC20SmartDebtExact(c.borrowToken.token1).balanceOf(perturbReceiver);
+        result.dexSlot2Before = vm.load(EXPECTED_SMART_DEBT_DEX, bytes32(uint256(2)));
+        result.dexSlot4Before = vm.load(EXPECTED_SMART_DEBT_DEX, bytes32(uint256(4)));
 
         vm.prank(owner);
         (, int256[] memory r) = IPlasmaVaultT4SmartDebtExact(VAULT).operatePerfect(
@@ -271,12 +290,14 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
             int256(perturbShares),
             1,
             1,
-            owner
+            perturbReceiver
         );
 
         assertEq(r.length, 6, "unexpected perturb return length");
-        result.borrowed0 = IERC20SmartDebtExact(c.borrowToken.token0).balanceOf(owner) - balance0Before;
-        result.borrowed1 = IERC20SmartDebtExact(c.borrowToken.token1).balanceOf(owner) - balance1Before;
+        result.borrowed0 =
+            IERC20SmartDebtExact(c.borrowToken.token0).balanceOf(perturbReceiver) - balance0Before;
+        result.borrowed1 =
+            IERC20SmartDebtExact(c.borrowToken.token1).balanceOf(perturbReceiver) - balance1Before;
         result.mintedShares = r[3];
         result.returnedDebt0 = r[4];
         result.returnedDebt1 = r[5];
@@ -310,8 +331,6 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
     {
         _freshFork();
         IPlasmaVaultT4SmartDebtExact.ConstantViews memory c = _constants();
-        bytes32 slot2Before = vm.load(EXPECTED_SMART_DEBT_DEX, bytes32(uint256(2)));
-        bytes32 slot4Before = vm.load(EXPECTED_SMART_DEBT_DEX, bytes32(uint256(4)));
         result = _borrowPerturb(c, donorNft, perturbShares);
         emit PerturbOnly(
             donorNft,
@@ -319,9 +338,9 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
             result.borrowed0,
             result.borrowed1,
             result.mintedShares,
-            slot2Before,
+            result.dexSlot2Before,
             result.dexSlot2After,
-            slot4Before,
+            result.dexSlot4Before,
             result.dexSlot4After
         );
     }
@@ -338,6 +357,8 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
             targetNft,
             donorNft,
             perturbShares,
+            perturb.borrowed0,
+            perturb.borrowed1,
             closeResult.spent0,
             closeResult.spent1,
             closeResult.burnedShares,
@@ -347,33 +368,64 @@ contract PlasmaSmartDebtExactCloseInteractionTest is Test {
         );
     }
 
+    function _assertSamePerturb(
+        PerturbResult memory control,
+        PerturbResult memory combined
+    ) internal pure {
+        require(combined.borrowed0 == control.borrowed0, "non-identical perturb token0");
+        require(combined.borrowed1 == control.borrowed1, "non-identical perturb token1");
+        require(combined.mintedShares == control.mintedShares, "non-identical perturb shares");
+        require(combined.returnedDebt0 == control.returnedDebt0, "non-identical perturb return0");
+        require(combined.returnedDebt1 == control.returnedDebt1, "non-identical perturb return1");
+        require(combined.dexSlot2Before == control.dexSlot2Before, "non-identical DEX slot2 before");
+        require(combined.dexSlot2After == control.dexSlot2After, "non-identical DEX slot2 after");
+        require(combined.dexSlot4Before == control.dexSlot4Before, "non-identical DEX slot4 before");
+        require(combined.dexSlot4After == control.dexSlot4After, "non-identical DEX slot4 after");
+    }
+
     function _probe(uint256 targetNft, uint256 donorNft, uint256 perturbShares) internal {
         assertTrue(targetNft != donorNft, "target equals donor");
 
         CloseResult memory baseline = _runBaseline(targetNft);
         PerturbResult memory perturbOnly = _runPerturbOnly(donorNft, perturbShares);
-        (PerturbResult memory combinedPerturb, CloseResult memory combined) =
+        (PerturbResult memory combinedPerturb, CloseResult memory combinedClose) =
             _runCombined(targetNft, donorNft, perturbShares);
 
-        // The B and C perturb legs must be byte-for-byte identical before the target close.
-        assertEq(combinedPerturb.borrowed0, perturbOnly.borrowed0, "non-identical perturb token0");
-        assertEq(combinedPerturb.borrowed1, perturbOnly.borrowed1, "non-identical perturb token1");
-        assertEq(combinedPerturb.mintedShares, perturbOnly.mintedShares, "non-identical perturb shares");
-        assertEq(combinedPerturb.dexSlot2After, perturbOnly.dexSlot2After, "non-identical DEX slot2");
-        assertEq(combinedPerturb.dexSlot4After, perturbOnly.dexSlot4After, "non-identical DEX slot4");
+        _assertSamePerturb(perturbOnly, combinedPerturb);
+        assertEq(combinedClose.burnedShares, baseline.burnedShares, "target debt shares changed");
 
-        emit ExactInteraction(
+        int256 baselineNet0 = -_toInt(baseline.spent0);
+        int256 baselineNet1 = -_toInt(baseline.spent1);
+        int256 perturbOnlyNet0 = _toInt(perturbOnly.borrowed0);
+        int256 perturbOnlyNet1 = _toInt(perturbOnly.borrowed1);
+        int256 combinedNet0 = _toInt(combinedPerturb.borrowed0) - _toInt(combinedClose.spent0);
+        int256 combinedNet1 = _toInt(combinedPerturb.borrowed1) - _toInt(combinedClose.spent1);
+
+        int256 residual0 = combinedNet0 - baselineNet0 - perturbOnlyNet0;
+        int256 residual1 = combinedNet1 - baselineNet1 - perturbOnlyNet1;
+        int256 closeCostDelta0 = _signedDelta(combinedClose.spent0, baseline.spent0);
+        int256 closeCostDelta1 = _signedDelta(combinedClose.spent1, baseline.spent1);
+
+        // With identical perturb legs, the explicit three-arm residual is exactly
+        // the negative change in target close cost. It is intentionally not
+        // constrained to zero: a non-zero value is the interaction under test.
+        assertEq(residual0, -closeCostDelta0, "token0 residual algebra mismatch");
+        assertEq(residual1, -closeCostDelta1, "token1 residual algebra mismatch");
+
+        emit ExactThreeControlResidual(
             targetNft,
             donorNft,
             perturbShares,
-            baseline.spent0,
-            baseline.spent1,
-            combined.spent0,
-            combined.spent1,
-            _signedDelta(combined.spent0, baseline.spent0),
-            _signedDelta(combined.spent1, baseline.spent1),
-            perturbOnly.borrowed0,
-            perturbOnly.borrowed1
+            baselineNet0,
+            baselineNet1,
+            perturbOnlyNet0,
+            perturbOnlyNet1,
+            combinedNet0,
+            combinedNet1,
+            residual0,
+            residual1,
+            closeCostDelta0,
+            closeCostDelta1
         );
     }
 
