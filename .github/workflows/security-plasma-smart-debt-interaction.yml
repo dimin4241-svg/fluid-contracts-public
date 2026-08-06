@@ -28,33 +28,55 @@ jobs:
         with:
           version: stable
 
+      - name: Prepare isolated proof root
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf audit-smart-debt
+          mkdir -p audit-smart-debt/src audit-smart-debt/test audit-smart-debt/lib evidence-smart-debt
+          cp test/security/PlasmaSmartDebtCloseInteraction.t.sol audit-smart-debt/test/
+          cp -R lib/forge-std audit-smart-debt/lib/forge-std
+          cat > audit-smart-debt/foundry.toml <<'EOF'
+          [profile.default]
+          src = "src"
+          test = "test"
+          libs = ["lib"]
+          solc_version = "0.8.21"
+          optimizer = true
+          optimizer_runs = 200
+          remappings = ["forge-std/=lib/forge-std/src/"]
+          EOF
+
       - name: Record pinned deployed state
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence-smart-debt
+          VAULT_CODE="$(cast code 0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF --block "${PLASMA_FORK_BLOCK}" --rpc-url "${PLASMA_RPC_URL}")"
+          DEX_CODE="$(cast code 0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71 --block "${PLASMA_FORK_BLOCK}" --rpc-url "${PLASMA_RPC_URL}")"
           {
             echo "fork_block=${PLASMA_FORK_BLOCK}"
             echo "chain_id=$(cast chain-id --rpc-url "${PLASMA_RPC_URL}")"
             echo "vault=0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF"
             echo "dex=0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71"
-            echo "vault_code=$(cast code 0x6E0cDB5C21B3C8E340e9C9210057035BAFA86FFF --block "${PLASMA_FORK_BLOCK}" --rpc-url "${PLASMA_RPC_URL}" | wc -c)"
-            echo "dex_code=$(cast code 0xbd5Dd095d9a6565C8222Bb36b5814953f1C46f71 --block "${PLASMA_FORK_BLOCK}" --rpc-url "${PLASMA_RPC_URL}" | wc -c)"
+            echo "vault_code_bytes=$(( (${#VAULT_CODE} - 2) / 2 ))"
+            echo "dex_code_bytes=$(( (${#DEX_CODE} - 2) / 2 ))"
+            echo "vault_code_prefix=${VAULT_CODE:0:66}"
+            echo "dex_code_prefix=${DEX_CODE:0:66}"
           } | tee evidence-smart-debt/deployed-state.txt
 
       - name: Run three-control deployed-fork matrix
         shell: bash
         run: |
           set -o pipefail
-          forge test --via-ir \
-            --match-path test/security/PlasmaSmartDebtCloseInteraction.t.sol \
+          forge test --root audit-smart-debt --via-ir \
+            --match-path test/PlasmaSmartDebtCloseInteraction.t.sol \
             -vvvv 2>&1 | tee evidence-smart-debt/full.log
 
       - name: Extract numerical evidence
         if: always()
         shell: bash
         run: |
-          grep -E 'DeploymentProof\(|BaselineClose\(|InteractionProof\(|MaximumResidual\(|Suite result|Failing tests|Compiler run failed|Error:' \
+          grep -E 'DeploymentProof\(|BaselineClose\(|InteractionProof\(|MaximumResidual\(|Suite result|Failing tests|Compiler run failed|Error:|vault missing|dex missing|fSL6 not found' \
             evidence-smart-debt/full.log \
             | tee evidence-smart-debt/summary.log || true
 
