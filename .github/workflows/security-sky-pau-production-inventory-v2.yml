@@ -1,0 +1,136 @@
+name: Security Sky PAU production inventory v2
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-pau-production-inventory-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Query production PAU
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          endpoints=(
+            'https://ethereum-rpc.publicnode.com'
+            'https://mainnet.gateway.tenderly.co'
+            'https://eth.drpc.org'
+            'https://eth-mainnet.public.blastapi.io'
+          )
+          rpc=''
+          for candidate in "${endpoints[@]}"; do
+            if cast block-number --rpc-url "$candidate" >/dev/null 2>&1; then rpc="$candidate"; break; fi
+          done
+          test -n "$rpc" || exit 1
+
+          CONTROLLER=0xbf83F5974B932c7D842254042717D6A2706CE5eE
+          ACCESS=0x4F6d1704700cd494DD4cd9bF59c0C39DA1Bc9164
+          PROXY=0x0DcD9298e163dFD3c0B5b00F0d9093C36e40A153
+          RATELIMITS=0xE016Ae733A77Ba77E7907aAA749394Fc5e75C0e1
+          AGENT=0xdBD17832df0e57b1732cE1C84c652E820e549BAa
+          BEACON=0x829dC2b7E94B1954F0764E573f2E0d45Afa28199
+          ALM_RELAYER=0x0eEC86649E756a23CBc68d9EFEd756f16aD5F85f
+          PRIMARY=0x4364D17B578b0eD1c42Be9075D774D1d6AeAFe96
+          SECONDARY=0x9187807e07112359C481870feB58f0c117a29179
+          FREEZER=0xB0113804960345fd0a245788b3423319c86940e5
+          GROVE_PROXY=0x1369f7b2b38c76B6478c0f0E66D94923421891Ba
+          USDC=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+          USDS=0xdC035D45d973E3EC169d2276DDab16f1e407384F
+          DAI=0x6B175474E89094C44Da98b954EedeAC495271d0F
+          USDT=0xdAC17F958D2ee523a2206206994597C13D831ec7
+          ALLOCATOR_ROLE=$(cast keccak 'ALLOCATOR_ROLE')
+          DEFAULT_ROLE=0x$(printf '0%.0s' {1..64})
+
+          call() { cast call "$@" --rpc-url "$rpc" 2>&1 || true; }
+
+          {
+            echo "block=$(cast block-number --rpc-url "$rpc")"
+            echo "rpc=$rpc"
+            echo
+            echo '=== wiring ==='
+            call $CONTROLLER 'accessControls()(address)'
+            call $CONTROLLER 'proxy()(address)'
+            call $CONTROLLER 'rateLimits()(address)'
+            call $CONTROLLER 'beacon()(address)'
+
+            echo
+            echo '=== code and common proxy slots ==='
+            for x in $CONTROLLER $ACCESS $PROXY $RATELIMITS $AGENT $BEACON $ALM_RELAYER $PRIMARY $SECONDARY $FREEZER $GROVE_PROXY; do
+              code=$(cast code $x --rpc-url "$rpc" 2>/dev/null || echo 0x)
+              bytes=$(( (${#code} - 2) / 2 ))
+              echo "address=$x bytes=$bytes code=$code"
+              echo -n '  eip1967.impl='; cast storage $x 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url "$rpc" 2>/dev/null || true
+              echo -n '  slot0='; cast storage $x 0 --rpc-url "$rpc" 2>/dev/null || true
+            done
+
+            echo
+            echo '=== AccessControls members ==='
+            for role in $DEFAULT_ROLE $ALLOCATOR_ROLE; do
+              n=$(call $ACCESS 'getRoleMemberCount(bytes32)(uint256)' $role | head -1)
+              echo "role=$role count=$n"
+              if [[ "$n" =~ ^[0-9]+$ ]]; then
+                for ((i=0;i<n;i++)); do call $ACCESS 'getRoleMember(bytes32,uint256)(address)' $role $i; done
+              fi
+            done
+
+            echo
+            echo '=== Proxy ALLOCATOR_ROLE members ==='
+            n=$(call $PROXY 'getRoleMemberCount(bytes32)(uint256)' $ALLOCATOR_ROLE | head -1)
+            echo "count=$n"
+            if [[ "$n" =~ ^[0-9]+$ ]]; then
+              for ((i=0;i<n;i++)); do call $PROXY 'getRoleMember(bytes32,uint256)(address)' $ALLOCATOR_ROLE $i; done
+            fi
+
+            echo
+            echo '=== Agent members ==='
+            for kind in Admin Actor Grantor Revoker; do
+              lower=$(echo "$kind" | tr '[:upper:]' '[:lower:]')
+              n=$(call $AGENT "${lower}Count()(uint256)" | head -1)
+              echo "$kind count=$n"
+              if [[ "$n" =~ ^[0-9]+$ ]]; then
+                for ((i=0;i<n;i++)); do call $AGENT "get${kind}(uint256)(address)" $i; done
+              fi
+            done
+
+            echo
+            echo '=== expected membership ==='
+            for x in $ALM_RELAYER $PRIMARY $SECONDARY; do echo -n "$x actor="; call $AGENT 'getIsActor(address)(bool)' $x; done
+            echo -n "$FREEZER revoker="; call $AGENT 'getIsRevoker(address)(bool)' $FREEZER
+            echo -n "$GROVE_PROXY admin="; call $AGENT 'getIsAdmin(address)(bool)' $GROVE_PROXY
+
+            echo
+            echo '=== integrations ==='
+            echo -n 'controller raw='; cast calldata 'integrations()' | xargs cast call $CONTROLLER --rpc-url "$rpc" 2>&1 || true
+            echo -n 'beacon raw='; cast calldata 'integrations()' | xargs cast call $BEACON --rpc-url "$rpc" 2>&1 || true
+
+            echo
+            echo '=== proxy balances ==='
+            for token in $USDC $USDS $DAI $USDT; do echo -n "$token "; call $token 'balanceOf(address)(uint256)' $PROXY; done
+            echo -n 'ETH '; cast balance $PROXY --rpc-url "$rpc" 2>&1 || true
+          } | tee evidence/inventory.txt
+
+          exit 0
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-pau-production-inventory-v2
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
