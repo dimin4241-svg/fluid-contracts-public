@@ -1,0 +1,60 @@
+name: Plasma T4 live one-sided borrow
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-liquidation-20260806
+    paths:
+      - '.github/workflows/plasma-t4-live-one-sided-borrow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-one-sided:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated live-NFT probe
+        shell: bash
+        run: |
+          rm -rf audit/live-one-sided
+          mkdir -p audit/live-one-sided/test audit/live-one-sided/lib evidence-live-one-sided
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/live-one-sided/test/
+          cp test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol audit/live-one-sided/test/
+          cp test/security/PlasmaVaultT4LiveNftOneSidedBorrow.t.sol audit/live-one-sided/test/
+          cp -R lib/forge-std audit/live-one-sided/lib/forge-std
+      - name: Run live-NFT one-sided borrow matrix
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/live-one-sided --via-ir \
+            --match-contract PlasmaVaultT4LiveNftOneSidedBorrowTest \
+            --match-test test_liveNftOneSidedBorrow -vvvv 2>&1 \
+            | tee evidence-live-one-sided/live-one-sided.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(LiveBorrowReachability|LiveBorrowMovement|LiveBorrowLiquidation)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-live-one-sided/live-one-sided.log | tee evidence-live-one-sided/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-live-one-sided/block.txt
+          git rev-parse HEAD > evidence-live-one-sided/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-live-one-sided-borrow
+          path: evidence-live-one-sided/
+          if-no-files-found: error
+          retention-days: 30
