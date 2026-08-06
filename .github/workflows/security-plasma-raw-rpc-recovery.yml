@@ -19,20 +19,26 @@ jobs:
         run: |
           set -euo pipefail
           RPC=https://rpc.plasma.to
+          CLAIMED_BLOCK=0xbcff74
           rpc() {
             local method="$1" params="$2"
             curl -sS --max-time 30 -H 'content-type: application/json' \
               --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"${method}\",\"params\":${params}}" "$RPC"
           }
+          eth_call() {
+            local target="$1" selector="$2" block="${3:-latest}"
+            rpc eth_call "[{\"to\":\"${target}\",\"data\":\"${selector}\"},\"${block}\"]"
+          }
           echo "chain=$(rpc eth_chainId '[]')"
           echo "latest=$(rpc eth_blockNumber '[]')"
+          echo "claimed_decimal=12386164 claimed_hex=${CLAIMED_BLOCK}"
           for FSL in 0x983107BB3dcb71f3A30176114D8a17c454A62514 0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A; do
             echo "=== ${FSL} ==="
             echo "code_latest=$(rpc eth_getCode \"[\\\"${FSL}\\\",\\\"latest\\\"]\")"
-            echo "code_claimed=$(rpc eth_getCode \"[\\\"${FSL}\\\",\\\"0xbd0704\\\"]\")"
-            echo "DEX=$(rpc eth_call \"[{\\\"to\\\":\\\"${FSL}\\\",\\\"data\\\":\\\"0x80935aa9\\\"},\\\"latest\\\"]\")"
-            echo "TOKEN0=$(rpc eth_call \"[{\\\"to\\\":\\\"${FSL}\\\",\\\"data\\\":\\\"0x443ec74d\\\"},\\\"latest\\\"]\")"
-            echo "TOKEN1=$(rpc eth_call \"[{\\\"to\\\":\\\"${FSL}\\\",\\\"data\\\":\\\"0x5ee04d78\\\"},\\\"latest\\\"]\")"
-            echo "name=$(rpc eth_call \"[{\\\"to\\\":\\\"${FSL}\\\",\\\"data\\\":\\\"0x06fdde03\\\"},\\\"latest\\\"]\")"
-            echo "symbol=$(rpc eth_call \"[{\\\"to\\\":\\\"${FSL}\\\",\\\"data\\\":\\\"0x95d89b41\\\"},\\\"latest\\\"]\")"
+            echo "code_claimed=$(rpc eth_getCode \"[\\\"${FSL}\\\",\\\"${CLAIMED_BLOCK}\\\"]\")"
+            echo "DEX=$(eth_call "$FSL" 0x80935aa9)"
+            echo "TOKEN0=$(eth_call "$FSL" 0x443ec74d)"
+            echo "TOKEN1=$(eth_call "$FSL" 0x5ee04d78)"
+            echo "name=$(eth_call "$FSL" 0x06fdde03)"
+            echo "symbol=$(eth_call "$FSL" 0x95d89b41)"
           done
