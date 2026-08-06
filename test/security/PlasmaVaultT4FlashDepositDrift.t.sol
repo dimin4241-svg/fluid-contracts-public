@@ -3,10 +3,6 @@ pragma solidity 0.8.21;
 
 import {Test} from "forge-std/Test.sol";
 
-interface IERC20FlashDeposit {
-    function decimals() external view returns (uint8);
-}
-
 interface IFluidVaultT4FlashDeposit {
     function operate(
         uint256 nftId,
@@ -60,23 +56,47 @@ contract PlasmaVaultT4FlashDepositDriftTest is Test {
     address internal constant TOKEN0 = 0xb77E872A68C62CfC0dFb02C067Ecc3DA23B4bbf3;
     address internal constant TOKEN1 = 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb;
 
-    event DepositProbe(
+    struct ProbeState {
+        uint256 units0;
+        uint256 units1;
+        uint256 balance0Before;
+        uint256 balance1Before;
+        uint256 gasBefore;
+        uint256 rateBefore;
+        uint256 rateDuring;
+        uint256 rateAfter;
+        uint256 liquidationInBefore;
+        uint256 liquidationInDuring;
+        uint256 nftId;
+        int256 colShares;
+        int256 drift;
+    }
+
+    event DepositExecution(
         uint256 indexed units0,
         uint256 indexed units1,
-        bool depositSuccess,
-        bytes4 depositRevertSelector,
+        bool success,
+        bytes4 revertSelector,
         uint256 nftId,
-        int256 mintedColShares,
+        int256 mintedColShares
+    );
+
+    event DepositImpact(
+        uint256 indexed units0,
+        uint256 indexed units1,
         uint256 rateBefore,
         uint256 rateDuring,
         int256 drift,
         uint256 absoluteDriftPpm,
         uint256 liquidationInBefore,
-        uint256 liquidationOutBefore,
-        uint256 liquidationInDuring,
-        uint256 liquidationOutDuring,
-        bool closeSuccess,
-        bytes4 closeRevertSelector,
+        uint256 liquidationInDuring
+    );
+
+    event DepositClose(
+        uint256 indexed units0,
+        uint256 indexed units1,
+        bool success,
+        bytes4 revertSelector,
         uint256 rateAfter,
         int256 token0Net,
         int256 token1Net,
@@ -103,21 +123,21 @@ contract PlasmaVaultT4FlashDepositDriftTest is Test {
     function test_balanced_5m() public { _probe(5_000_000, 5_000_000); }
 
     function _probe(uint256 units0, uint256 units1) internal {
-        uint256 amount0 = units0 * 1e18;
-        uint256 amount1 = units1 * 1e6;
-        uint256 balance0Before = _balance(TOKEN0);
-        uint256 balance1Before = _balance(TOKEN1);
-        uint256 rateBefore = IFluidOracleFlashDeposit(ORACLE).getExchangeRateLiquidate();
-        IFluidVaultResolverFlashDeposit.LiquidationStruct memory beforeData =
-            IFluidVaultResolverFlashDeposit(RESOLVER).getVaultLiquidation(VAULT, 0);
-        uint256 gasBefore = gasleft();
+        ProbeState memory p;
+        p.units0 = units0;
+        p.units1 = units1;
+        p.balance0Before = _balance(TOKEN0);
+        p.balance1Before = _balance(TOKEN1);
+        p.rateBefore = IFluidOracleFlashDeposit(ORACLE).getExchangeRateLiquidate();
+        p.liquidationInBefore = _liquidationIn();
+        p.gasBefore = gasleft();
 
         (bool depositOk, bytes memory depositData) = VAULT.call(
             abi.encodeWithSelector(
                 IFluidVaultT4FlashDeposit.operate.selector,
                 0,
-                int256(amount0),
-                int256(amount1),
+                int256(units0 * 1e18),
+                int256(units1 * 1e6),
                 int256(1),
                 int256(0),
                 int256(0),
@@ -127,43 +147,54 @@ contract PlasmaVaultT4FlashDepositDriftTest is Test {
         );
 
         if (!depositOk || depositData.length < 96) {
-            emit DepositProbe(
+            emit DepositExecution(units0, units1, false, _selector(depositData), 0, 0);
+            emit DepositImpact(
+                units0,
+                units1,
+                p.rateBefore,
+                p.rateBefore,
+                0,
+                0,
+                p.liquidationInBefore,
+                p.liquidationInBefore
+            );
+            emit DepositClose(
                 units0,
                 units1,
                 false,
-                _selector(depositData),
-                0,
-                0,
-                rateBefore,
-                rateBefore,
-                0,
-                0,
-                beforeData.inAmt,
-                beforeData.outAmt,
-                beforeData.inAmt,
-                beforeData.outAmt,
-                false,
                 bytes4(0),
-                rateBefore,
+                p.rateBefore,
                 0,
                 0,
-                gasBefore - gasleft()
+                p.gasBefore - gasleft()
             );
             return;
         }
 
-        (uint256 nftId, int256 colShares, ) = abi.decode(depositData, (uint256, int256, int256));
-        uint256 rateDuring = IFluidOracleFlashDeposit(ORACLE).getExchangeRateLiquidate();
-        IFluidVaultResolverFlashDeposit.LiquidationStruct memory duringData =
-            IFluidVaultResolverFlashDeposit(RESOLVER).getVaultLiquidation(VAULT, 0);
-        int256 drift = int256(rateDuring) - int256(rateBefore);
-        uint256 absDrift = drift >= 0 ? uint256(drift) : uint256(-drift);
+        (p.nftId, p.colShares, ) = abi.decode(depositData, (uint256, int256, int256));
+        emit DepositExecution(units0, units1, true, bytes4(0), p.nftId, p.colShares);
+
+        p.rateDuring = IFluidOracleFlashDeposit(ORACLE).getExchangeRateLiquidate();
+        p.liquidationInDuring = _liquidationIn();
+        p.drift = int256(p.rateDuring) - int256(p.rateBefore);
+        uint256 absoluteDrift = p.drift >= 0 ? uint256(p.drift) : uint256(-p.drift);
+
+        emit DepositImpact(
+            units0,
+            units1,
+            p.rateBefore,
+            p.rateDuring,
+            p.drift,
+            (absoluteDrift * 1_000_000) / p.rateBefore,
+            p.liquidationInBefore,
+            p.liquidationInDuring
+        );
 
         (bool closeOk, bytes memory closeData) = VAULT.call(
             abi.encodeWithSelector(
                 IFluidVaultT4FlashDeposit.operatePerfect.selector,
-                nftId,
-                -colShares,
+                p.nftId,
+                -p.colShares,
                 int256(-1),
                 int256(-1),
                 int256(0),
@@ -173,29 +204,23 @@ contract PlasmaVaultT4FlashDepositDriftTest is Test {
             )
         );
 
-        uint256 rateAfter = IFluidOracleFlashDeposit(ORACLE).getExchangeRateLiquidate();
-        emit DepositProbe(
+        p.rateAfter = IFluidOracleFlashDeposit(ORACLE).getExchangeRateLiquidate();
+        emit DepositClose(
             units0,
             units1,
-            true,
-            bytes4(0),
-            nftId,
-            colShares,
-            rateBefore,
-            rateDuring,
-            drift,
-            (absDrift * 1_000_000) / rateBefore,
-            beforeData.inAmt,
-            beforeData.outAmt,
-            duringData.inAmt,
-            duringData.outAmt,
             closeOk,
             _selector(closeOk ? bytes("") : closeData),
-            rateAfter,
-            int256(_balance(TOKEN0)) - int256(balance0Before),
-            int256(_balance(TOKEN1)) - int256(balance1Before),
-            gasBefore - gasleft()
+            p.rateAfter,
+            int256(_balance(TOKEN0)) - int256(p.balance0Before),
+            int256(_balance(TOKEN1)) - int256(p.balance1Before),
+            p.gasBefore - gasleft()
         );
+    }
+
+    function _liquidationIn() internal returns (uint256) {
+        IFluidVaultResolverFlashDeposit.LiquidationStruct memory data =
+            IFluidVaultResolverFlashDeposit(RESOLVER).getVaultLiquidation(VAULT, 0);
+        return data.inAmt;
     }
 
     function _balance(address token) internal view returns (uint256 value) {
@@ -215,6 +240,6 @@ contract PlasmaVaultT4FlashDepositDriftTest is Test {
 
     function _selector(bytes memory data) internal pure returns (bytes4 out) {
         if (data.length < 4) return bytes4(0);
-        assembly { out := mload(add(data, 32)) }
+        assembly ("memory-safe") { out := mload(add(data, 32)) }
     }
 }
