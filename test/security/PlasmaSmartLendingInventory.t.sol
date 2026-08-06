@@ -26,8 +26,8 @@ interface ISmartLendingView {
 contract PlasmaSmartLendingInventory {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
-    address internal constant FACTORY = 0xe57227c7d5900165344b190fc7aa580bceb53b9b;
-    address internal constant TARGET_POOL = 0x080574d224e960c272e005aa03efbe793f317640;
+    address internal constant FACTORY = 0xe57227C7d5900165344b190fc7aa580bceb53B9B;
+    address internal constant TARGET_POOL = 0x080574D224E960c272e005aA03EFbe793f317640;
 
     event InventoryHeader(uint256 forkBlock, uint256 totalSmartLendings, uint256 allTokensLength);
     event WrapperInventory(
