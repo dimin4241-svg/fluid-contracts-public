@@ -1,0 +1,58 @@
+name: Plasma T4 rebalance auth probe
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-liquidation-20260806
+    paths:
+      - '.github/workflows/plasma-t4-rebalance-auth-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebalance-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated auth probe
+        shell: bash
+        run: |
+          rm -rf audit/rebalance-auth
+          mkdir -p audit/rebalance-auth/test audit/rebalance-auth/lib evidence-rebalance-auth
+          cp test/security/PlasmaVaultT4RebalanceAuthProbe.t.sol audit/rebalance-auth/test/
+          cp -R lib/forge-std audit/rebalance-auth/lib/forge-std
+      - name: Run pinned rebalance auth probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/rebalance-auth --via-ir \
+            --match-contract PlasmaVaultT4RebalanceAuthProbeTest \
+            --match-test test_liveRebalanceAuthorization -vvvv 2>&1 \
+            | tee evidence-rebalance-auth/rebalance-auth.log
+      - name: Extract auth evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(RebalanceLiveState|RebalanceAuthResult)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-rebalance-auth/rebalance-auth.log | tee evidence-rebalance-auth/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-rebalance-auth/block.txt
+          git rev-parse HEAD > evidence-rebalance-auth/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-rebalance-auth-probe
+          path: evidence-rebalance-auth/
+          if-no-files-found: error
+          retention-days: 30
