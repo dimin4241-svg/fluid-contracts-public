@@ -39,7 +39,8 @@ jobs:
             echo "block=$(cast block-number --rpc-url "$RPC_URL")"
             for h in "${handlers[@]}"; do
               echo "=== $h ==="
-              echo "code_bytes=$(( (${#$(cast code "$h" --rpc-url "$RPC_URL")} - 2) / 2 ))" 2>/dev/null || true
+              code="$(cast code "$h" --rpc-url "$RPC_URL" 2>/dev/null || echo 0x)"
+              echo "code_bytes=$(( (${#code} - 2) / 2 ))"
               for sig in \
                 'RESERVE_CONTRACT()(address)' \
                 'LIQUIDITY()(address)' \
