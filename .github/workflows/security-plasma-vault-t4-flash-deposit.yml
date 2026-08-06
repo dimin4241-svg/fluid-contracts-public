@@ -1,0 +1,69 @@
+name: Security Plasma Vault T4 flash deposit drift
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-oracle-drift-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4FlashDepositDrift.t.sol'
+      - '.github/workflows/security-plasma-vault-t4-flash-deposit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flash-deposit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated harness
+        shell: bash
+        run: |
+          rm -rf audit/t4-flash-deposit-poc
+          mkdir -p audit/t4-flash-deposit-poc/test audit/t4-flash-deposit-poc/lib evidence-plasma-vault-t4-flash-deposit
+          cp test/security/PlasmaVaultT4FlashDepositDrift.t.sol audit/t4-flash-deposit-poc/test/
+          cp -R lib/forge-std audit/t4-flash-deposit-poc/lib/forge-std
+
+      - name: Measure permissionless deposit drift
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/t4-flash-deposit-poc \
+            --via-ir \
+            --match-path test/PlasmaVaultT4FlashDepositDrift.t.sol \
+            -vvvv 2>&1 | tee evidence-plasma-vault-t4-flash-deposit/flash-deposit.log
+
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E "DepositProbe\(|Suite result|Failing tests|Error:|Compiler run failed" \
+            evidence-plasma-vault-t4-flash-deposit/flash-deposit.log \
+            | tee evidence-plasma-vault-t4-flash-deposit/summary.log || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-flash-deposit
+          path: evidence-plasma-vault-t4-flash-deposit/
+          if-no-files-found: error
+          retention-days: 30
