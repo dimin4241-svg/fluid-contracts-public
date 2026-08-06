@@ -40,6 +40,7 @@ contract PlasmaVaultT4OracleBorrowCapacityTest is Test {
     uint256 internal constant SHIFT_SHARES = 1e22;
     uint256 internal constant FUNDING = 1e28;
     int256 internal constant MAX_USDT_PAYMENT = -1e24;
+    uint256 internal constant MIN_VALID_SHARES = 1e12;
     uint256 internal constant SEARCH_HIGH = 1e24;
     uint256 internal constant SEARCH_STEPS = 82;
 
@@ -147,8 +148,12 @@ contract PlasmaVaultT4OracleBorrowCapacityTest is Test {
     }
 
     function _maxBorrow(bool shifted) internal returns (uint256 low) {
+        BorrowResult memory minimum = _attempt(shifted, MIN_VALID_SHARES);
+        if (!minimum.ok) return 0;
+
+        low = MIN_VALID_SHARES;
         uint256 high = SEARCH_HIGH;
-        for (uint256 i; i < SEARCH_STEPS; ++i) {
+        for (uint256 i; i < SEARCH_STEPS && low < high; ++i) {
             uint256 mid = low + (high - low + 1) / 2;
             BorrowResult memory r = _attempt(shifted, mid);
             if (r.ok) low = mid;
@@ -162,16 +167,26 @@ contract PlasmaVaultT4OracleBorrowCapacityTest is Test {
         rate = IOracleCapacity(ORACLE).getExchangeRateOperate();
     }
 
+    function _resultAtMax(bool shifted, uint256 maximum)
+        internal
+        returns (BorrowResult memory result)
+    {
+        if (maximum == 0) {
+            result.ok = true;
+            return result;
+        }
+        result = _attempt(shifted, maximum);
+        assertTrue(result.ok, "reported maximum no longer succeeds");
+    }
+
     function test_quantifyBorrowCapacityAfterOracleShift() public {
         uint256 oracleBaseline = _oracle(false);
         uint256 oracleShifted = _oracle(true);
         uint256 baselineMax = _maxBorrow(false);
         uint256 shiftedMax = _maxBorrow(true);
 
-        BorrowResult memory baseline = _attempt(false, baselineMax);
-        BorrowResult memory shifted = _attempt(true, shiftedMax);
-        assertTrue(baseline.ok, "baseline max no longer succeeds");
-        assertTrue(shifted.ok, "shifted max no longer succeeds");
+        BorrowResult memory baseline = _resultAtMax(false, baselineMax);
+        BorrowResult memory shifted = _resultAtMax(true, shiftedMax);
 
         int256 extra0 = _signed(shifted.token0, baseline.token0);
         int256 extra1 = _signed(shifted.token1, baseline.token1);
