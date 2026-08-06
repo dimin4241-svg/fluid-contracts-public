@@ -31,6 +31,7 @@ jobs:
           rm -rf audit/rebalance-auth
           mkdir -p audit/rebalance-auth/test audit/rebalance-auth/lib evidence-rebalance-auth
           cp test/security/PlasmaVaultT4RebalanceAuthProbe.t.sol audit/rebalance-auth/test/
+          sed -i 's/0x264786ef916af64a1db19f513f24a3681734ce92/0x264786EF916af64a1DB19F513F24a3681734ce92/g' audit/rebalance-auth/test/PlasmaVaultT4RebalanceAuthProbe.t.sol
           cp -R lib/forge-std audit/rebalance-auth/lib/forge-std
       - name: Run pinned rebalance auth probe
         shell: bash
