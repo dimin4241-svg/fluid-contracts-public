@@ -1,0 +1,69 @@
+name: Plasma T4 one-sided combined macOS
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-liquidation-20260806
+    paths:
+      - '.github/workflows/plasma-t4-one-sided-combined-macos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  combined:
+    runs-on: macos-14
+    timeout-minutes: 50
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated probes
+        shell: bash
+        run: |
+          rm -rf audit/one-sided-combined
+          mkdir -p audit/one-sided-combined/test audit/one-sided-combined/lib evidence-one-sided-combined
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/one-sided-combined/test/
+          cp test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol audit/one-sided-combined/test/
+          cp test/security/PlasmaVaultT4OneSidedBorrowLiquidation.t.sol audit/one-sided-combined/test/
+          cp test/security/PlasmaVaultT4OneSidedBorrowLiquidationV2.t.sol audit/one-sided-combined/test/
+          cp test/security/PlasmaVaultT4LiveNftOneSidedBorrow.t.sol audit/one-sided-combined/test/
+          cp -R lib/forge-std audit/one-sided-combined/lib/forge-std
+      - name: Run feasible new-position probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/one-sided-combined --via-ir \
+            --match-contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test \
+            --match-test test_feasibleOneSidedBorrowLiquidation -vvvv 2>&1 \
+            | tee evidence-one-sided-combined/feasible.log
+      - name: Run live-NFT probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/one-sided-combined --via-ir \
+            --match-contract PlasmaVaultT4LiveNftOneSidedBorrowTest \
+            --match-test test_liveNftOneSidedBorrow -vvvv 2>&1 \
+            | tee evidence-one-sided-combined/live.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(FeasibleCase|FeasibleDeposit|FeasibleBorrow|FeasibleLiquidation)\(|Suite result|Failing tests|Error:|revert' evidence-one-sided-combined/feasible.log > evidence-one-sided-combined/feasible-summary.log || true
+          grep -E '(LiveBorrowReachability|LiveBorrowMovement|LiveBorrowLiquidation)\(|Suite result|Failing tests|Error:|revert' evidence-one-sided-combined/live.log > evidence-one-sided-combined/live-summary.log || true
+          git rev-parse HEAD > evidence-one-sided-combined/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-one-sided-combined-macos
+          path: evidence-one-sided-combined/
+          if-no-files-found: error
+          retention-days: 30
