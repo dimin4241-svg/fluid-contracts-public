@@ -1,0 +1,66 @@
+name: Plasma stateful existing Windows
+
+on:
+  push:
+    branches:
+      - audit/plasma-one-sided-isolated-20260806
+    paths:
+      - '.github/workflows/plasma-stateful-existing-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plasma-stateful-existing-windows
+  cancel-in-progress: true
+
+jobs:
+  stateful:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/plasma-t4-liquidation-20260806
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated stateful proof
+        shell: bash
+        run: |
+          rm -rf audit/stateful
+          mkdir -p audit/stateful/test audit/stateful/lib evidence-stateful
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/stateful/test/
+          cp test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol audit/stateful/test/
+          cp test/security/PlasmaVaultT4OneSidedBorrowLiquidation.t.sol audit/stateful/test/
+          cp test/security/PlasmaVaultT4OneSidedBorrowLiquidationV2.t.sol audit/stateful/test/
+          cp -R lib/forge-std audit/stateful/lib/forge-std
+      - name: Run pinned stateful proof
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/stateful --via-ir \
+            --match-contract PlasmaVaultT4OneSidedBorrowLiquidationV2Test \
+            --match-test test_feasibleOneSidedBorrowLiquidation -vvvv 2>&1 \
+            | tee evidence-stateful/stateful.log
+      - name: Extract stateful evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(FeasibleCase|FeasibleDeposit|FeasibleBorrow|FeasibleLiquidation)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-stateful/stateful.log | tee evidence-stateful/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-stateful/block.txt
+          git rev-parse HEAD > evidence-stateful/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-stateful-one-sided
+          path: evidence-stateful/
+          if-no-files-found: error
+          retention-days: 30
