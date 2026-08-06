@@ -15,9 +15,9 @@ interface ISmartLendingFactory {
 }
 
 interface ISmartLendingView {
-    function POOL() external view returns (address);
-    function TOKEN_0() external view returns (address);
-    function TOKEN_1() external view returns (address);
+    function DEX() external view returns (address);
+    function TOKEN0() external view returns (address);
+    function TOKEN1() external view returns (address);
     function totalSupply() external view returns (uint256);
     function name() external view returns (string memory);
     function symbol() external view returns (string memory);
@@ -72,9 +72,9 @@ contract PlasmaSmartLendingInventory {
             address wrapper = wrappers[i];
             ISmartLendingView smart = ISmartLendingView(wrapper);
 
-            address pool = smart.POOL();
-            address token0 = smart.TOKEN_0();
-            address token1 = smart.TOKEN_1();
+            address pool = smart.DEX();
+            address token0 = smart.TOKEN0();
+            address token1 = smart.TOKEN1();
             uint256 supply = smart.totalSupply();
             bool recognized = factory.isSmartLending(wrapper);
             string memory name_ = smart.name();
