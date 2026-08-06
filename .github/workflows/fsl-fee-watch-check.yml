@@ -1,14 +1,9 @@
 name: fSL feeOrReward one-shot check
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fsl-fee-watch-check.yml'
   pull_request:
     paths:
       - '.github/workflows/fsl-fee-watch-check.yml'
-      - 'scripts/security/check_fsl_fee_or_reward.py'
   workflow_dispatch:
 
 permissions:
@@ -93,14 +88,11 @@ jobs:
                 errors.append(f'{rpc}: {exc!r}')
             return {'network':network,'chain_id':chain_id,'address':address,'error':errors}
 
-          rows = []
           with ThreadPoolExecutor(max_workers=21) as pool:
-            futures = [pool.submit(check, t) for t in targets]
-            for future in as_completed(futures):
-              rows.append(future.result())
+            rows = [f.result() for f in as_completed([pool.submit(check, t) for t in targets])]
           rows.sort(key=lambda r:(r['chain_id'], r['address'].lower()))
           failures = [r for r in rows if 'error' in r]
-          nonzero = [r for r in rows if 'raw_int32' in r and r['raw_int32'] != 0]
+          nonzero = [r for r in rows if r.get('raw_int32',0) != 0]
           print(json.dumps({'checked_at_utc':datetime.now(timezone.utc).isoformat(),'target_count':len(targets),'success_count':len(rows)-len(failures),'failure_count':len(failures),'nonzero':nonzero,'results':rows}, indent=2))
           PY
       - uses: actions/upload-artifact@v4
@@ -109,4 +101,4 @@ jobs:
           path: fsl-result.json
           retention-days: 1
 
-# PR trigger: 2026-08-06T03:02Z
+# fresh trigger: 2026-08-06T06:54Z
