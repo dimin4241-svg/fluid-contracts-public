@@ -29,7 +29,7 @@ jobs:
         run: |
           set +e
           mkdir -p automation
-          python scripts/security/check_fsl_fee_or_reward.py > automation/fsl-result.json 2> automation/fsl-errors.txt
+          python scripts/security/check_fsl_fee_or_reward_fast.py > automation/fsl-result.json 2> automation/fsl-errors.txt
           code=$?
           echo "=== RESULTS ==="
           cat automation/fsl-result.json
