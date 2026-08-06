@@ -1,0 +1,97 @@
+name: Security Sky full IlkRegistry validation
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-full-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Select stable archive Ethereum RPC
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-sky-full-validation
+          REG=0x5a464C28D19848f44199D003BeF5ecc87d090F87
+          endpoints=(
+            'https://eth-mainnet.public.blastapi.io'
+            'https://mainnet.gateway.tenderly.co'
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://rpc.payload.de'
+          )
+          for rpc in "${endpoints[@]}"; do
+            historical=$(timeout 30 cast call "$REG" 'count()(uint256)' --block 23118263 --rpc-url "$rpc" 2>/dev/null || true)
+            current=$(timeout 30 cast call "$REG" 'count()(uint256)' --block 25694337 --rpc-url "$rpc" 2>/dev/null || true)
+            latest=$(timeout 30 cast call "$REG" 'count()(uint256)' --rpc-url "$rpc" 2>/dev/null || true)
+            if [[ "$historical" =~ ^72 ]] && [[ "$current" =~ ^35 ]] && [[ "$latest" =~ ^[0-9]+ ]]; then
+              echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
+              {
+                echo "selected=$rpc"
+                echo "historical_block_23118263_count=$historical"
+                echo "snapshot_block_25694337_count=$current"
+                echo "latest_count=$latest"
+              } | tee evidence-sky-full-validation/rpc.log
+              exit 0
+            fi
+          done
+          exit 1
+
+      - name: Build all PoC contracts with standard compiler
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -o pipefail
+          forge build 2>&1 | tee ../evidence-sky-full-validation/forge-build.log
+
+      - name: Run complete IlkRegistry validation suite
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -o pipefail
+          forge test \
+            --match-path 'src/IlkRegistry*.t.sol' \
+            -vv 2>&1 | tee ../evidence-sky-full-validation/forge-test.log
+
+      - name: Extract validation summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            cat evidence-sky-full-validation/rpc.log 2>/dev/null || true
+            echo '--- build ---'
+            grep -E '(Compiling|Compiler run successful|Error:|Warning)' evidence-sky-full-validation/forge-build.log 2>/dev/null || true
+            echo '--- tests ---'
+            grep -E '(Ran [0-9]+ tests|Suite result|PASS|FAIL|Failing tests|Error:)' evidence-sky-full-validation/forge-test.log 2>/dev/null || true
+          } | tee evidence-sky-full-validation/summary.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-full-ilk-registry-validation
+          path: evidence-sky-full-validation/
+          if-no-files-found: error
+          retention-days: 30
