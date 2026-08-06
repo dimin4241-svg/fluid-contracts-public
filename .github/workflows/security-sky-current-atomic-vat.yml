@@ -1,0 +1,74 @@
+name: Security Sky current atomic Vat propagation
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-current-atomic-vat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout Sky PoC branch
+        uses: actions/checkout@v4
+        with:
+          repository: dimin4241-svg/dss-emergency-spells
+          ref: audit/ilk-registry-readd-proof
+          path: sky-poc
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Run current one-call proof with RPC failover
+        shell: bash
+        working-directory: sky-poc
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence-sky-current-atomic-vat
+          endpoints=(
+            'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
+            'https://mainnet.gateway.tenderly.co'
+            'https://eth-mainnet.public.blastapi.io'
+            'https://rpc.payload.de'
+          )
+          forge build 2>&1 | tee ../evidence-sky-current-atomic-vat/forge-build.log
+          passed=0
+          for rpc in "${endpoints[@]}"; do
+            log=../evidence-sky-current-atomic-vat/forge-test.log
+            set +e
+            ETH_RPC_URL="$rpc" forge test \
+              --match-path src/IlkRegistryCurrentAtomicVatPropagation.t.sol \
+              --match-test testCurrentOneExternalCallRestoresLegacyPathsAndChangesVat \
+              -vvvv > "$log" 2>&1
+            rc=$?
+            set -e
+            cat "$log"
+            if [[ $rc -eq 0 ]] && grep -q '\[PASS\]' "$log"; then
+              echo "CASE_PASS current-atomic-vat rpc=$rpc" | tee ../evidence-sky-current-atomic-vat/summary.log
+              passed=1
+              break
+            fi
+          done
+          [[ $passed -eq 1 ]]
+          grep -E '(current Registry baseline|restored ilks|final Registry|retired ilks recached|Vat.spot values changed|one-call gas|block gas limit|PASS|Suite result)' "$log" \
+            | tee ../evidence-sky-current-atomic-vat/key-results.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-current-atomic-vat-propagation
+          path: evidence-sky-current-atomic-vat/
+          if-no-files-found: error
+          retention-days: 30
