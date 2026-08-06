@@ -1,0 +1,42 @@
+name: fSL runtime on-chain check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fsl-runtime-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Run all 21 on-chain calls
+        shell: bash
+        run: |
+          mkdir -p scripts/security/results
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py > scripts/security/results/fsl-fee-runtime-latest.json 2> scripts/security/results/fsl-fee-runtime-latest.err
+          rc=$?
+          echo "$rc" > scripts/security/results/fsl-fee-runtime-latest.exit
+          exit 0
+      - name: Publish result to audit branch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/security/results/fsl-fee-runtime-latest.json scripts/security/results/fsl-fee-runtime-latest.err scripts/security/results/fsl-fee-runtime-latest.exit
+          git commit -m 'Record runtime fSL feeOrReward check' || exit 0
+          git push origin HEAD:audit/read-only-dex-fees-20260805
