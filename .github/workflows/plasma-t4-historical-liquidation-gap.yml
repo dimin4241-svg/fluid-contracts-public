@@ -1,0 +1,57 @@
+name: Plasma T4 historical liquidation gap
+
+on:
+  push:
+    branches:
+      - audit/plasma-t4-liquidation-20260806
+    paths:
+      - '.github/workflows/plasma-t4-historical-liquidation-gap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-gap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated historical scanner
+        shell: bash
+        run: |
+          rm -rf audit/historical-liquidation-gap
+          mkdir -p audit/historical-liquidation-gap/test audit/historical-liquidation-gap/lib audit/historical-liquidation-gap/contracts/libraries evidence-historical-gap
+          cp test/security/PlasmaVaultT4HistoricalLiquidationGap.t.sol audit/historical-liquidation-gap/test/
+          cp contracts/libraries/tickMath.sol audit/historical-liquidation-gap/contracts/libraries/
+          cp -R lib/forge-std audit/historical-liquidation-gap/lib/forge-std
+      - name: Run historical liquidation scan
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/historical-liquidation-gap --via-ir \
+            --match-contract PlasmaVaultT4HistoricalLiquidationGapTest \
+            --match-test test_scanHistoricalLiquidationGap -vvvv 2>&1 \
+            | tee evidence-historical-gap/historical-gap.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(HistoricalDeployment|HistoricalSample|HistoricalSampleFailure|HistoricalNearest)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-historical-gap/historical-gap.log | tee evidence-historical-gap/summary.log || true
+          git rev-parse HEAD > evidence-historical-gap/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-historical-liquidation-gap
+          path: evidence-historical-gap/
+          if-no-files-found: error
+          retention-days: 30
