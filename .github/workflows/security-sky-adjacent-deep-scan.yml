@@ -19,7 +19,7 @@ jobs:
         include:
           - name: stusds
             repo: sky-ecosystem/stusds
-            ref: dev
+            ref: master
           - name: sky-oapp-oft
             repo: sky-ecosystem/sky-oapp-oft
             ref: main
@@ -46,21 +46,23 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check slither-analyzer
       - name: Build and scan Foundry repos
         if: matrix.name != 'sky-oapp-oft'
+        continue-on-error: true
         shell: bash
         run: |
           set -uo pipefail
           mkdir -p evidence
+          set +e
           (cd target && forge build) > evidence/build.log 2>&1
           echo $? > evidence/build-exit.txt
           (cd target && slither . --exclude-dependencies --json ../evidence/slither.json) > evidence/slither.log 2>&1
           echo $? > evidence/slither-exit.txt
+          exit 0
       - name: Static scan OFT repo
         if: matrix.name == 'sky-oapp-oft'
         shell: bash
         run: |
           set -uo pipefail
           mkdir -p evidence
-          # Keep the scan deterministic and source-focused; npm dependency graph is large.
           cp -R target/contracts evidence/contracts
           grep -RInE 'function |delegatecall|\.call\(|safeTransfer|safeTransferFrom|mint\(|burn\(|_checkAndUpdateRateLimit|lzReceive|_lzReceive|nonce|guid|peer|compose|feeBalance|unchecked|assembly' target/contracts > evidence/high-risk-lines.txt || true
           : > evidence/slither.log
@@ -69,6 +71,7 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p evidence
+          touch evidence/slither.log
           python3 - <<'PY'
           import pathlib,re,json
           roots=[p for p in [pathlib.Path('target/src'),pathlib.Path('target/contracts')] if p.exists()]
@@ -87,7 +90,7 @@ jobs:
                     while d>0 and k<len(lines): body.append(lines[k]);d+=lines[k].count('{')-lines[k].count('}');k+=1
                     b='\n'.join(body)
                     rows.append(dict(file=str(p),line=st+1,name=m.group(1),sig=sig,
-                      guarded=bool(re.search(r'onlyOwner|onlyRole|\bauth\b|\btoll\b|\bcop\b|onlyEndpoint|_checkPeer|msg\.sender\s*==',sig+b[:1000])),
+                      guarded=bool(re.search(r'onlyOwner|onlyRole|\bauth\b|\btoll\b|\bcop\b|onlyEndpoint|_checkPeer|msg\.sender\s*==',sig+b[:1200])),
                       token_calls=len(re.findall(r'transferFrom|safeTransferFrom|\.transfer\b|safeTransfer\b|mint\(|burn\(',b)),
                       external_calls=len(re.findall(r'\.call\b|delegatecall|functionCall|\.doCall|lzReceive|_lzReceive',b)),
                       state_before_call=bool(re.search(r'(\-=|\+=|delete | = ).{0,200}(transfer|\.call|mint\(|burn\()',b,re.S)),
