@@ -1,0 +1,79 @@
+name: Temporary fSL push check
+
+on:
+  push:
+    branches: [main]
+    paths: ['fsl-trigger.txt']
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Check all 21 fSL values
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re, requests, json, datetime, concurrent.futures, time
+          text=open('.github/workflows/fsl-rate-watch-temp.yml',encoding='utf-8').read()
+          urls=[]
+          for u in re.findall(r'https://api\.routescan\.io/v2/network/mainnet/evm/\d+/etherscan/api\?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x[0-9A-Fa-f]{40}', text):
+            if u not in urls: urls.append(u)
+          assert len(urls)==21, len(urls)
+          names={8453:'Base',9745:'Plasma',137:'Polygon',42161:'Arbitrum',1:'Ethereum'}
+          rpcs={1:['https://ethereum-rpc.publicnode.com','https://rpc.ankr.com/eth'],8453:['https://base-rpc.publicnode.com','https://mainnet.base.org'],137:['https://polygon-bor-rpc.publicnode.com','https://polygon-rpc.com'],42161:['https://arbitrum-one-rpc.publicnode.com','https://arb1.arbitrum.io/rpc'],9745:['https://rpc.plasma.to','https://plasma.drpc.org']}
+          def dec(x):
+            v=int(x,16)&0xffffffff
+            return v-(1<<32) if v&0x80000000 else v
+          def rpccall(cid,a):
+            p={'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':a,'data':'0xe47a882d'},'latest']}
+            errs=[]
+            for rpc in rpcs[cid]:
+              try:
+                j=requests.post(rpc,json=p,timeout=30).json(); x=j.get('result')
+                if isinstance(x,str) and x.startswith('0x'): return x,rpc
+                errs.append({rpc:j})
+              except Exception as e: errs.append({rpc:repr(e)})
+            raise RuntimeError(str(errs))
+          def one(u):
+            m=re.search(r'/evm/(\d+)/.*[?&]to=(0x[0-9A-Fa-f]{40})',u); cid=int(m.group(1)); a=m.group(2); errs=[]; x=None; src=None
+            for i in range(3):
+              try:
+                j=requests.get(u,timeout=30).json(); y=j.get('result')
+                if isinstance(y,str) and y.startswith('0x'): x=y; src='routescan'; break
+                errs.append({'routescan':j})
+              except Exception as e: errs.append({'routescan':repr(e)})
+              time.sleep(i+1)
+            if x is None:
+              try: x,src=rpccall(cid,a)
+              except Exception as e: return {'network':names[cid],'chain_id':cid,'address':a,'canonical_routescan_url':u,'error':str(e),'routescan_errors':errs}
+            raw=dec(x); conf=None
+            if raw!=0:
+              try:
+                y,r=rpccall(cid,a); conf={'rpc':r,'result':y,'raw_int32':dec(y),'match':y.lower()==x.lower() and dec(y)==raw}
+                if not conf['match']: return {'network':names[cid],'chain_id':cid,'address':a,'canonical_routescan_url':u,'result':x,'raw_int32':raw,'error':'nonzero confirmation mismatch','independent_confirmation':conf}
+              except Exception as e: return {'network':names[cid],'chain_id':cid,'address':a,'canonical_routescan_url':u,'result':x,'raw_int32':raw,'error':'nonzero confirmation failed: '+str(e)}
+            return {'network':names[cid],'chain_id':cid,'address':a,'canonical_routescan_url':u,'source':src,'result':x,'raw_int32':raw,'annual_percent':raw/10000,'independent_confirmation':conf}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=21) as ex: rows=list(ex.map(one,urls))
+          now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+          out={'checked_at_utc':now,'target_count':21,'success_count':sum('error' not in x and 'raw_int32' in x for x in rows),'failure_count':sum('error' in x for x in rows),'nonzero':[x for x in rows if x.get('raw_int32') not in (None,0) and 'error' not in x],'results':rows,'failures':[x for x in rows if 'error' in x]}
+          open('fsl-push-result.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Commit result
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add fsl-push-result.json
+          git commit -m 'Record fSL push check result' || exit 0
+          git push origin HEAD:main
