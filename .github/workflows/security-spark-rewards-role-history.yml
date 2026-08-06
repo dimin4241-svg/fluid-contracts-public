@@ -1,0 +1,85 @@
+name: Security Spark Rewards role history
+
+on:
+  push:
+    branches: [audit/sky-ilk-registry-race-runner-20260806]
+    paths: ['.github/workflows/security-spark-rewards-role-history.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Reconstruct deployment and AccessControl events
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 - <<'PY'
+          import json, urllib.request, pathlib, time
+          RPC='https://mainnet.optimism.io'
+          ADDR='0xf94473bf6ef648638a7b1eeef354fe440721ef41'.lower()
+          def rpc(method, params):
+              data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode()
+              req=urllib.request.Request(RPC,data=data,headers={'Content-Type':'application/json'})
+              for n in range(6):
+                  try:
+                      out=json.loads(urllib.request.urlopen(req,timeout=40).read())
+                      if 'error' in out: raise RuntimeError(out['error'])
+                      return out['result']
+                  except Exception:
+                      if n==5: raise
+                      time.sleep(1+n)
+          latest=int(rpc('eth_blockNumber',[]),16)
+          lo,hi=0,latest
+          while lo<hi:
+              mid=(lo+hi)//2
+              code=rpc('eth_getCode',[ADDR,hex(mid)])
+              if code!='0x': hi=mid
+              else: lo=mid+1
+          deployed=lo
+          topics={
+            'RoleGranted':'0x2f8788117e7eff1d82d7f0f7d82f58f98f74e7d46a6d30b991e3f4c2d2efc16',
+            'RoleRevoked':'0xf6391f5c32d9c8b13be6d60183c599ab2c5b2b13b1e650e5f5e9cd5053a7d3c6',
+            'WalletUpdated':'0x'+__import__('hashlib').sha3_256(b'WalletUpdated(address,address)').hexdigest(),
+            'MerkleRootUpdated':'0x'+__import__('hashlib').sha3_256(b'MerkleRootUpdated(bytes32,bytes32)').hexdigest(),
+            'EpochIsClosed':'0x'+__import__('hashlib').sha3_256(b'EpochIsClosed(uint256,bool)').hexdigest(),
+          }
+          # Use known Ethereum keccak topics from eth_getLogs lookup for AccessControl; query all address logs
+          # in bounded chunks, then classify by topic0. This also avoids depending on sha3 vs keccak locally.
+          logs=[]
+          step=100_000
+          for start in range(deployed,latest+1,step):
+              end=min(latest,start+step-1)
+              part=rpc('eth_getLogs',[{'address':ADDR,'fromBlock':hex(start),'toBlock':hex(end)}])
+              logs.extend(part)
+          pathlib.Path('evidence/all-logs.json').write_text(json.dumps(logs,indent=2))
+          # Decode AccessControl events by canonical topics.
+          role_granted='0x2f8788117e7eff1d82d7f0f7d82f58f98f74e7d46a6d30b991e3f4c2d2efc16'
+          role_revoked='0xf6391f5c32d9c8b13be6d60183c599ab2c5b2b13b1e650e5f5e9cd5053a7d3c6'
+          active={}
+          decoded=[]
+          for log in logs:
+              ts=[x.lower() for x in log.get('topics',[])]
+              if not ts or ts[0] not in (role_granted,role_revoked): continue
+              role=ts[1]
+              account='0x'+ts[2][-40:]
+              sender='0x'+ts[3][-40:]
+              granted=ts[0]==role_granted
+              active[(role,account)]=granted
+              decoded.append({'block':int(log['blockNumber'],16),'tx':log['transactionHash'],'granted':granted,'role':role,'account':account,'sender':sender})
+          active_rows=[{'role':r,'account':a} for (r,a),v in active.items() if v]
+          result={'latest':latest,'deploymentBlock':deployed,'totalLogs':len(logs),'roleEvents':decoded,'activeRoles':active_rows}
+          pathlib.Path('evidence/summary.json').write_text(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spark-rewards-role-history
+          path: evidence/
+          retention-days: 30
