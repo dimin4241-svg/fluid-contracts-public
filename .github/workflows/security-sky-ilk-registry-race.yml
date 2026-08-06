@@ -1,4 +1,4 @@
-name: Security Sky keeper impact after mass re-add
+name: Security Sky persistence and companion actions
 
 on:
   push:
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence-sky-keeper-impact
+          mkdir -p evidence-sky-persistence
           endpoints=(
             'https://eth.drpc.org'
             'https://rpc.payload.de'
@@ -44,36 +44,35 @@ jobs:
           for rpc in "${endpoints[@]}"; do
             if output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
               echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
-              echo "selected=$rpc current_registry_count=$output" | tee evidence-sky-keeper-impact/rpc.log
+              echo "selected=$rpc current_registry_count=$output" | tee evidence-sky-persistence/rpc.log
               exit 0
             fi
           done
           exit 1
 
-      - name: Compare deployed keeper jobs and Sequencer batch
+      - name: Run persistence and companion-action proofs
         shell: bash
         working-directory: sky-poc
         run: |
           set -o pipefail
           forge test \
-            --match-path src/IlkRegistryKeeperGas.t.sol \
-            --match-test testCompareAllActiveKeeperJobsAndSequencerBatch \
-            -vvvv 2>&1 | tee ../evidence-sky-keeper-impact/forge-test.log
+            --match-path src/IlkRegistryPersistence.t.sol \
+            -vvvv 2>&1 | tee ../evidence-sky-persistence/forge-test.log
 
       - name: Extract proof summary
         if: always()
         shell: bash
         run: |
           {
-            cat evidence-sky-keeper-impact/rpc.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|fork block|block gas limit|master network|active jobs|registry count|restored legacy|=== job index ===|job 0x|ok |canWork|gas |gas increase|gas decrease|sequencer batch|jobs with changed|maximum)' evidence-sky-keeper-impact/forge-test.log 2>/dev/null || true
-          } | tee evidence-sky-keeper-impact/summary.log
+            cat evidence-sky-persistence/rpc.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|restored entries|public removals blocked|registry count after|AAVE Join external collateral balance|AAVE token decimals|Vat/not-authorized|caged adapter|governance cage)' evidence-sky-persistence/forge-test.log 2>/dev/null || true
+          } | tee evidence-sky-persistence/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-keeper-impact-after-mass-readd
-          path: evidence-sky-keeper-impact/
+          name: sky-persistence-and-companion-actions
+          path: evidence-sky-persistence/
           if-no-files-found: error
           retention-days: 30
