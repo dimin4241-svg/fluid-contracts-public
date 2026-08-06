@@ -1,0 +1,70 @@
+name: Security Plasma Vault T4 bytecode inventory
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-lending-execution-20260806
+    paths:
+      - 'test/security/PlasmaVaultT4BytecodeInventory.t.sol'
+      - '.github/workflows/security-plasma-vault-t4-bytecode-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  t4-bytecode-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+    steps:
+      - name: Checkout inventory branch
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve fresh Plasma fork block
+        shell: bash
+        run: |
+          echo "PLASMA_FORK_BLOCK=$(cast block-number --rpc-url "$PLASMA_RPC_URL")" >> "$GITHUB_ENV"
+
+      - name: Prepare isolated bytecode inventory harness
+        shell: bash
+        run: |
+          rm -rf audit/t4-bytecode-inventory-poc
+          mkdir -p audit/t4-bytecode-inventory-poc/test audit/t4-bytecode-inventory-poc/lib evidence-vault-t4-bytecode
+          cp test/security/PlasmaVaultT4BytecodeInventory.t.sol audit/t4-bytecode-inventory-poc/test/
+          cp -R lib/forge-std audit/t4-bytecode-inventory-poc/lib/forge-std
+
+      - name: Enumerate live T4 vaults and positions
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/t4-bytecode-inventory-poc \
+            --via-ir \
+            --match-path test/PlasmaVaultT4BytecodeInventory.t.sol \
+            -vvvv 2>&1 | tee evidence-vault-t4-bytecode/t4-bytecode-inventory.log
+
+      - name: Extract evidence summary
+        if: always()
+        shell: bash
+        run: |
+          grep -E "(InventoryHeader|T4VaultInventory|T4Position|T4Summary)\(|Suite result|Failing tests|Error:" \
+            evidence-vault-t4-bytecode/t4-bytecode-inventory.log \
+            | tee evidence-vault-t4-bytecode/t4-bytecode-summary.log || true
+
+      - name: Upload T4 bytecode inventory evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-vault-t4-bytecode-inventory
+          path: evidence-vault-t4-bytecode/
+          if-no-files-found: error
+          retention-days: 30
