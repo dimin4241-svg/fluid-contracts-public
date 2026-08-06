@@ -57,7 +57,7 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
 
     struct Position {
         address owner;
-        uint256 borrowShares;
+        uint256 resolverBorrowShares;
     }
 
     struct Close {
@@ -91,7 +91,9 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
 
     event BaselineV2(
         uint256 indexed nftId,
-        uint256 borrowShares,
+        uint256 resolverBorrowShares,
+        uint256 burnedShares,
+        int256 resolverShareDrift,
         uint256 spentGho,
         uint256 spentUsdt0,
         uint256 positionDataAfter
@@ -112,7 +114,7 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
 
     event InteractionV2(
         uint256 indexed nftId,
-        uint256 borrowShares,
+        uint256 burnedShares,
         uint256 baselineSpentGho,
         uint256 baselineSpentUsdt0,
         uint256 perturbedSpentGho,
@@ -121,7 +123,7 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
         int256 interactionUsdt0,
         int256 interactionNominal1e18,
         int256 interactionPpm,
-        int256 interactionPerBorrowShare1e18,
+        int256 interactionPerBurnedShare1e18,
         int256 threeControlResidualGho,
         int256 threeControlResidualUsdt0
     );
@@ -157,12 +159,12 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
         p.owner = address(uint160(_word(data, 1)));
         bool liquidated = _word(data, 2) != 0;
         bool supplyPosition = _word(data, 3) != 0;
-        p.borrowShares = _word(data, 10);
+        p.resolverBorrowShares = _word(data, 10);
 
         require(returnedNft == nftId, "nft mismatch");
         require(p.owner == IFactoryV2(FACTORY).ownerOf(nftId), "owner mismatch");
         require(!liquidated && !supplyPosition, "not active debt");
-        require(p.borrowShares > 0, "zero debt shares");
+        require(p.resolverBorrowShares > 0, "zero debt quote");
     }
 
     function _approve(address token, address owner, address spender) internal {
@@ -217,10 +219,9 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
         result.burnedShares = uint256(-values[3]);
         result.positionDataAfter = _positionData(nftId);
 
-        assertEq(result.burnedShares, p.borrowShares, "partial share burn");
         assertEq(result.spentGho, uint256(-values[4]), "GHO spend mismatch");
         assertEq(result.spentUsdt0, uint256(-values[5]), "USDT0 spend mismatch");
-        assertEq(result.positionDataAfter & 1, 1, "debt remains");
+        assertEq(result.positionDataAfter & 1, 1, "debt remains after max payback");
     }
 
     function _perturb() internal returns (Perturb memory result) {
@@ -268,7 +269,9 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
         Close memory baseline = _close(NFT);
         emit BaselineV2(
             NFT,
-            initial.borrowShares,
+            initial.resolverBorrowShares,
+            baseline.burnedShares,
+            int256(baseline.burnedShares) - int256(initial.resolverBorrowShares),
             baseline.spentGho,
             baseline.spentUsdt0,
             baseline.positionDataAfter
@@ -293,14 +296,14 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
         Perturb memory combinedPerturb = _perturb();
         Close memory perturbedClose = _close(NFT);
         _assertSamePerturb(perturbOnly, combinedPerturb);
-        assertEq(perturbedClose.burnedShares, initial.borrowShares, "combined close not full");
+        assertEq(perturbedClose.positionDataAfter & 1, 1, "combined debt remains");
 
         int256 interactionGho = _change(perturbedClose.spentGho, baseline.spentGho);
         int256 interactionUsdt0 = _change(perturbedClose.spentUsdt0, baseline.spentUsdt0);
         int256 interactionNominal = interactionGho + interactionUsdt0 * 1e12;
         uint256 baselineNominal = baseline.spentGho + baseline.spentUsdt0 * 1e12;
         int256 interactionPpm = (interactionNominal * 1_000_000) / int256(baselineNominal);
-        int256 interactionPerShare = (interactionNominal * 1e18) / int256(initial.borrowShares);
+        int256 interactionPerShare = (interactionNominal * 1e18) / int256(baseline.burnedShares);
 
         int256 perturbCostGho = -perturbOnly.swapperDeltaGho;
         int256 perturbCostUsdt0 = -perturbOnly.swapperDeltaUsdt0;
@@ -314,7 +317,7 @@ contract PlasmaVaultT4PureDexDebtCloseSmokeV2Test is Test {
 
         emit InteractionV2(
             NFT,
-            initial.borrowShares,
+            baseline.burnedShares,
             baseline.spentGho,
             baseline.spentUsdt0,
             perturbedClose.spentGho,
