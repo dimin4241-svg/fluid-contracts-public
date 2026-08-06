@@ -1,0 +1,54 @@
+name: Security BufferRate live inventory
+
+on:
+  push:
+    branches:
+      - audit/cross-module-high-critical-20260805
+    paths:
+      - '.github/workflows/security-buffer-rate-live-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mainnet:
+    runs-on: ubuntu-latest
+    env:
+      RPC_URL: 'https://ethereum-rpc.publicnode.com'
+      HANDLER: '0xB5af15a931dA1B1a7B8DCF6E2Cd31C8a3Dd1E134'
+      KEEPER: '0x70FfF8874e46b928d5d100512743e312a7025feA'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query live state
+        shell: bash
+        run: |
+          set -u
+          mkdir -p evidence-buffer-rate-live
+          {
+            echo "block=$(cast block-number --rpc-url "$RPC_URL")"
+            for sig in \
+              'RESERVE_CONTRACT()(address)' \
+              'LIQUIDITY()(address)' \
+              'SUPPLY_TOKEN()(address)' \
+              'BORROW_TOKEN()(address)' \
+              'RATE_BUFFER_KINK1()(int256)' \
+              'RATE_BUFFER_KINK2()(int256)' \
+              'MIN_UPDATE_DIFF()(uint256)' \
+              'supplyTokenLendingRate()(uint256)' \
+              'calcBorrowRates()(uint256,uint256)' \
+              'configPercentDiff()(uint256)'; do
+              printf '%s=' "$sig"
+              cast call "$HANDLER" "$sig" --rpc-url "$RPC_URL" 2>&1 || true
+            done
+            printf 'rebalance_as_keeper='
+            cast call "$HANDLER" 'rebalance()' --from "$KEEPER" --rpc-url "$RPC_URL" 2>&1 || true
+          } | tee evidence-buffer-rate-live/mainnet.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: buffer-rate-live-inventory
+          path: evidence-buffer-rate-live/
+          retention-days: 30
