@@ -1,13 +1,59 @@
 name: Plasma T4 liquidation isolated
 
 on:
+  push:
+    branches:
+      - audit/plasma-t4-liquidation-20260806
+    paths:
+      - '.github/workflows/plasma-t4-liquidation-isolated.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  placeholder:
+  liquidation:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
     steps:
-      - run: echo isolated
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated probe
+        shell: bash
+        run: |
+          rm -rf audit/liquidation-isolated
+          mkdir -p audit/liquidation-isolated/test audit/liquidation-isolated/lib evidence-liquidation-isolated
+          cp test/security/PlasmaVaultT4PureDexDebtCloseMatrixV2.t.sol audit/liquidation-isolated/test/
+          cp test/security/PlasmaVaultT4LiquidationSurfaceProbe.t.sol audit/liquidation-isolated/test/
+          cp -R lib/forge-std audit/liquidation-isolated/lib/forge-std
+      - name: Run liquidation probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/liquidation-isolated --via-ir \
+            --match-contract PlasmaVaultT4LiquidationSurfaceProbeTest \
+            --match-test test_liquidationSurfaceUnderPureDexPerturb -vvvv 2>&1 \
+            | tee evidence-liquidation-isolated/liquidation.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(LiquidationProbeSurface|LiquidationSimulation|LiquidationPerturbControl|LiquidationInteraction)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-liquidation-isolated/liquidation.log | tee evidence-liquidation-isolated/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-liquidation-isolated/block.txt
+          git rev-parse HEAD > evidence-liquidation-isolated/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-t4-liquidation-isolated
+          path: evidence-liquidation-isolated/
+          if-no-files-found: error
+          retention-days: 30
