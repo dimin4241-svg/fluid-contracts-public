@@ -1,4 +1,4 @@
-name: Security Sky exact current adapter proof
+name: Security Sky exact current adapter proof v2
 
 on:
   push:
@@ -82,7 +82,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-exact-current-adapter-proof
+          name: sky-exact-current-adapter-proof-v2
           path: evidence-sky-current-exact/
           if-no-files-found: error
           retention-days: 30
