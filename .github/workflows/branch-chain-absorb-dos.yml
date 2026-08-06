@@ -59,6 +59,7 @@ jobs:
         run: |
           mkdir -p automation
           set -o pipefail
+          # The test computes each new position's debt from the current on-chain top tick.
           forge test \
             --match-path test/foundry/security/branchChainAbsorbDos.t.sol \
             --match-contract BranchChainAbsorbDosTest \
