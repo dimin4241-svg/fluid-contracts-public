@@ -36,9 +36,13 @@ jobs:
         run: |
           set -euxo pipefail
           curl -L https://foundry.paradigm.xyz | bash
-          export PATH="$HOME/.foundry/bin:$PATH"
-          foundryup
-          echo "$HOME/.foundry/bin" >> "$GITHUB_PATH"
+          FOUNDRYUP_PATH="$(find "$HOME" -type f -name foundryup -print -quit)"
+          test -n "$FOUNDRYUP_PATH"
+          chmod +x "$FOUNDRYUP_PATH"
+          "$FOUNDRYUP_PATH"
+          FOUNDRY_BIN="$(dirname "$FOUNDRYUP_PATH")"
+          echo "$FOUNDRY_BIN" >> "$GITHUB_PATH"
+          "$FOUNDRY_BIN/forge" --version
 
       - name: Prepare isolated exact Smart Debt harness
         shell: bash
