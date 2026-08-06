@@ -8,7 +8,7 @@ interface IVaultFactoryPositionProbe {
 }
 
 contract PlasmaVaultT4PositionResolverProbeTest is Test {
-    address internal constant RESOLVER = 0x2795717571D0A03b5c8B5962fcAE2682B92D3a9a;
+    address internal constant RESOLVER = 0x2795717571d0a03B5c8b5962FcAE2682B92D3A9a;
     address internal constant FACTORY = 0x324c5Dc1fC42c7a4D43d92df1eBA58a54d13Bf2d;
     address internal constant VAULT = 0x6E0cDB09eb33cD3894C905E0DFF9289b95a86FFF;
 
