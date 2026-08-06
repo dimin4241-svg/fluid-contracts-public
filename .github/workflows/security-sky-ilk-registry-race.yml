@@ -1,4 +1,4 @@
-name: Security Sky persistence and companion actions v2
+name: Security Sky atomic governance cleanup reversal
 
 on:
   push:
@@ -29,50 +29,61 @@ jobs:
         with:
           version: stable
 
-      - name: Select stable Ethereum RPC
+      - name: Select stable archive Ethereum RPC
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence-sky-persistence
+          mkdir -p evidence-sky-atomic-reversal
           endpoints=(
-            'https://eth.drpc.org'
             'https://rpc.payload.de'
             'https://eth-mainnet.public.blastapi.io'
             'https://mainnet.gateway.tenderly.co'
             'https://ethereum-rpc.publicnode.com'
+            'https://eth.drpc.org'
           )
           for rpc in "${endpoints[@]}"; do
-            if output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --rpc-url "$rpc" 2>&1) && [[ "$output" =~ ^[0-9]+ ]]; then
+            stable=1
+            for attempt in 1 2; do
+              if ! output=$(timeout 30 cast call 0x5a464C28D19848f44199D003BeF5ecc87d090F87 'count()(uint256)' --block 23118263 --rpc-url "$rpc" 2>&1); then
+                stable=0
+                echo "$rpc attempt=$attempt failed: $output" | tee -a evidence-sky-atomic-reversal/rpc.log
+                break
+              fi
+              echo "$rpc attempt=$attempt count=$output" | tee -a evidence-sky-atomic-reversal/rpc.log
+              [[ "$output" =~ ^[0-9]+ ]] || stable=0
+            done
+            if [[ "$stable" == 1 ]]; then
               echo "ETH_RPC_URL=$rpc" >> "$GITHUB_ENV"
-              echo "selected=$rpc current_registry_count=$output" | tee evidence-sky-persistence/rpc.log
+              echo "selected=$rpc" | tee -a evidence-sky-atomic-reversal/rpc.log
               exit 0
             fi
           done
           exit 1
 
-      - name: Run persistence and companion-action proofs
+      - name: Run one-transaction real-spell reversal proof
         shell: bash
         working-directory: sky-poc
         run: |
           set -o pipefail
           forge test \
-            --match-path src/IlkRegistryPersistence.t.sol \
-            -vvvv 2>&1 | tee ../evidence-sky-persistence/forge-test.log
+            --match-path src/IlkRegistryAtomicGovernanceReversal.t.sol \
+            --match-test testOneUnprivilegedTransactionCastsSpellAndReversesCleanup \
+            -vvvv 2>&1 | tee ../evidence-sky-atomic-reversal/forge-test.log
 
       - name: Extract proof summary
         if: always()
         shell: bash
         run: |
           {
-            cat evidence-sky-persistence/rpc.log 2>/dev/null || true
-            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|restored entries|public removals blocked|registry count after|AAVE Join external collateral balance|AAVE token decimals|Vat/not-authorized|caged adapter|governance cage)' evidence-sky-persistence/forge-test.log 2>/dev/null || true
-          } | tee evidence-sky-persistence/summary.log
+            cat evidence-sky-atomic-reversal/rpc.log 2>/dev/null || true
+            grep -E '(PASS|FAIL|Suite result|Failing tests|Error:|spell done|restored atomically|final registry count|atomic call gas used|block gas limit)' evidence-sky-atomic-reversal/forge-test.log 2>/dev/null || true
+          } | tee evidence-sky-atomic-reversal/summary.log
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sky-persistence-and-companion-actions-v2
-          path: evidence-sky-persistence/
+          name: sky-atomic-governance-cleanup-reversal
+          path: evidence-sky-atomic-reversal/
           if-no-files-found: error
           retention-days: 30
