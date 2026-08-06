@@ -2,12 +2,11 @@ name: fSL feeOrReward check
 
 on:
   pull_request:
-    paths:
-      - 'scripts/security/check_fsl_fee_or_reward.py'
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
@@ -20,26 +19,26 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependency
-        run: python -m pip install requests
+        run: python -m pip install --disable-pip-version-check requests
       - name: Check all deployed fSL contracts
         shell: bash
         run: |
           set +e
           mkdir -p automation
-          python scripts/security/check_fsl_fee_or_reward.py > automation/fsl-result.json
+          python scripts/security/check_fsl_fee_or_reward.py > automation/fsl-result.json 2> automation/fsl-errors.txt
           code=$?
+          echo "=== RESULTS ==="
           cat automation/fsl-result.json
+          echo "=== STDERR ==="
+          cat automation/fsl-errors.txt || true
           echo "checker_exit_code=$code" >> "$GITHUB_STEP_SUMMARY"
           exit 0
-      - name: Commit result to the PR branch
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add automation/fsl-result.json
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git commit -m 'Record fSL on-chain verification result'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Upload raw result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsl-fee-or-reward-results
+          path: |
+            automation/fsl-result.json
+            automation/fsl-errors.txt
+          if-no-files-found: error
