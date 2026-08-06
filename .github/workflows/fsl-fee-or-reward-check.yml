@@ -3,10 +3,14 @@ name: fSL feeOrReward check
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'automation/fsl-trigger.txt'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   check:
@@ -33,6 +37,18 @@ jobs:
           cat automation/fsl-errors.txt || true
           echo "checker_exit_code=$code" >> "$GITHUB_STEP_SUMMARY"
           exit 0
+      - name: Commit result for push runs
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add automation/fsl-result.json automation/fsl-errors.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'Record fSL on-chain verification result'
+          git push
       - name: Upload raw result
         if: always()
         uses: actions/upload-artifact@v4
