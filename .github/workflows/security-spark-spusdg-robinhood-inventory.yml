@@ -1,0 +1,120 @@
+name: Security Spark spUSDG Robinhood inventory
+
+on:
+  push:
+    branches: [audit/sky-ilk-registry-race-runner-20260806]
+    paths: ['.github/workflows/security-spark-spusdg-robinhood-inventory.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query Robinhood production topology
+        shell: bash
+        run: |
+          set -u
+          mkdir -p evidence
+          rpc=https://rpc.mainnet.chain.robinhood.com
+          SPUSDG=0xde770c84FE66E063336b31737cFE9790f18c4087
+          USDG=0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168
+          META=0xBEEff039907422219Fb367e525954DDC092854d9
+          ALM_PROXY=0xfD2fD4B046136B540A56C11c75ac679AE7d1dB24
+          CONTROLLER=0xcf8d58A6eeF2a1cae2Ce69bC463b1178FB76bA1E
+          RATE_LIMITS=0x5c1fDE9d4C7f1BF4bc5dEAA2a7752e56232c68a0
+          EXECUTOR=0x826AEaeee9233fA8Ba199518dd8621A5962b1D02
+          SETTER=$(cast keccak SETTER_ROLE)
+          TAKER=$(cast keccak TAKER_ROLE)
+          RELAYER=$(cast keccak RELAYER)
+          DEFAULT=0x0000000000000000000000000000000000000000000000000000000000000000
+          LIMIT_TAKE=$(cast keccak LIMIT_SPARK_VAULT_TAKE)
+          LIMIT_ASSET=$(cast keccak LIMIT_ASSET_TRANSFER)
+          TAKE_KEY=$(cast keccak $(cast abi-encode 'f(bytes32,address)' $LIMIT_TAKE $SPUSDG))
+          RETURN_KEY=$(cast keccak $(cast abi-encode 'f(bytes32,address,address)' $LIMIT_ASSET $USDG $SPUSDG))
+
+          q() { echo -n "$1 "; shift; cast call "$@" --rpc-url "$rpc" 2>&1 || true; }
+          {
+            echo rpc=$rpc
+            echo -n 'chain-id '; cast chain-id --rpc-url "$rpc"
+            echo -n 'block '; cast block-number --rpc-url "$rpc"
+            echo '=== code sizes ==='
+            for a in $SPUSDG $USDG $META $ALM_PROXY $CONTROLLER $RATE_LIMITS $EXECUTOR; do
+              code=$(cast code $a --rpc-url "$rpc" 2>/dev/null || echo 0x)
+              echo "$a $(((${#code}-2)/2))"
+            done
+            echo '=== spUSDG state ==='
+            q asset $SPUSDG 'asset()(address)'
+            q impl $SPUSDG 'getImplementation()(address)'
+            q decimals $SPUSDG 'decimals()(uint8)'
+            q cap $SPUSDG 'depositCap()(uint256)'
+            q totalSupply $SPUSDG 'totalSupply()(uint256)'
+            q totalAssets $SPUSDG 'totalAssets()(uint256)'
+            q outstanding $SPUSDG 'assetsOutstanding()(uint256)'
+            q chi $SPUSDG 'chi()(uint192)'
+            q rho $SPUSDG 'rho()(uint64)'
+            q vsr $SPUSDG 'vsr()(uint256)'
+            q minVsr $SPUSDG 'minVsr()(uint256)'
+            q maxVsr $SPUSDG 'maxVsr()(uint256)'
+            q liquidity $USDG 'balanceOf(address)(uint256)' $SPUSDG
+            q alm-usdg $USDG 'balanceOf(address)(uint256)' $ALM_PROXY
+            echo '=== vault role holders ==='
+            for role in $DEFAULT $SETTER $TAKER; do
+              n=$(cast call $SPUSDG 'getRoleMemberCount(bytes32)(uint256)' $role --rpc-url "$rpc" 2>/dev/null || echo 0)
+              echo "role=$role count=$n"
+              for ((i=0;i<n;i++)); do cast call $SPUSDG 'getRoleMember(bytes32,uint256)(address)' $role $i --rpc-url "$rpc" || true; done
+            done
+            echo '=== controller relayers ==='
+            n=$(cast call $CONTROLLER 'getRoleMemberCount(bytes32)(uint256)' $RELAYER --rpc-url "$rpc" 2>/dev/null || echo 0)
+            echo count=$n
+            for ((i=0;i<n;i++)); do
+              a=$(cast call $CONTROLLER 'getRoleMember(bytes32,uint256)(address)' $RELAYER $i --rpc-url "$rpc" 2>/dev/null || true)
+              echo relayer=$a
+              code=$(cast code $a --rpc-url "$rpc" 2>/dev/null || echo 0x); echo codebytes=$(((${#code}-2)/2))
+              cast call $a 'masterCopy()(address)' --rpc-url "$rpc" 2>/dev/null || true
+              cast call $a 'getThreshold()(uint256)' --rpc-url "$rpc" 2>/dev/null || true
+            done
+            echo '=== ALM and rate limits ==='
+            q proxy-controller $ALM_PROXY 'hasRole(bytes32,address)(bool)' $(cast keccak CONTROLLER) $CONTROLLER
+            q take-rate $RATE_LIMITS 'getRateLimitData(bytes32)((uint256,uint256,uint256,uint256))' $TAKE_KEY
+            q return-rate $RATE_LIMITS 'getRateLimitData(bytes32)((uint256,uint256,uint256,uint256))' $RETURN_KEY
+            echo '=== MetaMorpho vault ==='
+            q meta-asset $META 'asset()(address)'
+            q meta-morpho $META 'MORPHO()(address)'
+            q meta-totalAssets $META 'totalAssets()(uint256)'
+            q meta-totalSupply $META 'totalSupply()(uint256)'
+            q withdrawQueueLength $META 'withdrawQueueLength()(uint256)'
+            q supplyQueueLength $META 'supplyQueueLength()(uint256)'
+            MORPHO=$(cast call $META 'MORPHO()(address)' --rpc-url "$rpc" 2>/dev/null || echo 0x0000000000000000000000000000000000000000)
+            wl=$(cast call $META 'withdrawQueueLength()(uint256)' --rpc-url "$rpc" 2>/dev/null || echo 0)
+            echo MORPHO=$MORPHO
+            echo '=== withdraw queue markets ==='
+            for ((i=0;i<wl;i++)); do
+              id=$(cast call $META 'withdrawQueue(uint256)(bytes32)' $i --rpc-url "$rpc" 2>/dev/null || true)
+              echo "index=$i id=$id"
+              cast call $MORPHO 'idToMarketParams(bytes32)(address,address,address,address,uint256)' $id --rpc-url "$rpc" 2>&1 || true
+              cast call $MORPHO 'market(bytes32)(uint128,uint128,uint128,uint128,uint128,uint128)' $id --rpc-url "$rpc" 2>&1 || true
+              cast call $META 'config(bytes32)(uint184,bool,uint64)' $id --rpc-url "$rpc" 2>&1 || true
+            done
+            sl=$(cast call $META 'supplyQueueLength()(uint256)' --rpc-url "$rpc" 2>/dev/null || echo 0)
+            echo '=== supply queue markets ==='
+            for ((i=0;i<sl;i++)); do
+              id=$(cast call $META 'supplyQueue(uint256)(bytes32)' $i --rpc-url "$rpc" 2>/dev/null || true)
+              echo "index=$i id=$id"
+              cast call $MORPHO 'idToMarketParams(bytes32)(address,address,address,address,uint256)' $id --rpc-url "$rpc" 2>&1 || true
+              cast call $MORPHO 'market(bytes32)(uint128,uint128,uint128,uint128,uint128,uint128)' $id --rpc-url "$rpc" 2>&1 || true
+              cast call $META 'config(bytes32)(uint184,bool,uint64)' $id --rpc-url "$rpc" 2>&1 || true
+            done
+          } | tee evidence/inventory.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spark-spusdg-robinhood-inventory
+          path: evidence/
+          retention-days: 30
