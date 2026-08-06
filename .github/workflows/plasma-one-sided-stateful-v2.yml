@@ -1,0 +1,57 @@
+name: Plasma one-sided stateful V2
+
+on:
+  push:
+    branches:
+      - audit/plasma-one-sided-isolated-20260806
+    paths:
+      - 'test/security/PlasmaOneSidedBorrowStatefulV2.t.sol'
+      - '.github/workflows/plasma-one-sided-stateful-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated root
+        shell: bash
+        run: |
+          rm -rf audit/stateful-v2
+          mkdir -p audit/stateful-v2/test audit/stateful-v2/lib evidence-stateful-v2
+          cp test/security/PlasmaOneSidedBorrowStatefulV2.t.sol audit/stateful-v2/test/
+          cp -R lib/forge-std audit/stateful-v2/lib/forge-std
+      - name: Run corrected fork probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/stateful-v2 --via-ir \
+            --match-contract PlasmaOneSidedBorrowStatefulV2Test \
+            --match-test test_oneSidedBorrowStatefulV2 -vvvv 2>&1 \
+            | tee evidence-stateful-v2/probe.log
+      - name: Extract evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(StatefulReachability|StatefulBorrow)\(|Suite result|Failing tests|Error:|revert' evidence-stateful-v2/probe.log | tee evidence-stateful-v2/summary.log || true
+          git rev-parse HEAD > evidence-stateful-v2/commit.txt
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-one-sided-stateful-v2
+          path: evidence-stateful-v2/
+          if-no-files-found: error
+          retention-days: 30
