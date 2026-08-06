@@ -1,0 +1,107 @@
+name: Security Sky adjacent PAU surface scan
+
+on:
+  push:
+    branches:
+      - audit/sky-ilk-registry-race-runner-20260806
+    paths:
+      - '.github/workflows/security-sky-adjacent-pau-scan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout diamond-pau
+        uses: actions/checkout@v4
+        with:
+          repository: sky-ecosystem/diamond-pau
+          ref: dev
+          path: target
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Build
+        working-directory: target
+        run: forge build
+
+      - name: Install Slither
+        run: python3 -m pip install --disable-pip-version-check slither-analyzer
+
+      - name: Run focused security surface scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+
+          set +e
+          (cd target && slither . --exclude-dependencies --json ../evidence/slither.json) \
+            > evidence/slither.log 2>&1
+          echo $? > evidence/slither-exit-code.txt
+          set -e
+
+          python3 - <<'PY' > evidence/entrypoints.tsv
+          import pathlib, re
+          root = pathlib.Path('target/src')
+          print('file\tline\tfunction\tvisibility\tmodifiers')
+          for path in sorted(root.rglob('*.sol')):
+              text = path.read_text(errors='ignore')
+              lines = text.splitlines()
+              i = 0
+              while i < len(lines):
+                  if re.search(r'\bfunction\b', lines[i]):
+                      start = i
+                      sig = lines[i].strip()
+                      while '{' not in sig and ';' not in sig and i + 1 < len(lines) and len(sig) < 1500:
+                          i += 1
+                          sig += ' ' + lines[i].strip()
+                      if re.search(r'\b(external|public)\b', sig):
+                          name = re.search(r'function\s+([A-Za-z0-9_]*)', sig)
+                          vis = re.search(r'\b(external|public)\b', sig)
+                          mods = []
+                          for token in ['onlyRole', 'nonReentrant', 'auth', 'toll', 'onlyAdmin', 'view', 'pure', 'payable']:
+                              if token in sig: mods.append(token)
+                          print(f'{path}\t{start+1}\t{name.group(1) if name else ""}\t{vis.group(1)}\t{",".join(mods)}')
+                  i += 1
+          PY
+
+          grep -RInE 'delegatecall|functionCallWithValue|\.approve\(|transferFrom\(|safeTransfer|triggerRateLimit(Increase|Decrease)|callback|on[A-Z][A-Za-z0-9_]*Received|permit|signature|nonce|assembly|selfdestruct' \
+            target/src > evidence/high-risk-lines.txt || true
+
+          python3 - <<'PY' > evidence/unprotected-mutating-entrypoints.tsv
+          import csv
+          rows = list(csv.DictReader(open('evidence/entrypoints.tsv'), delimiter='\t'))
+          print('file\tline\tfunction\tvisibility\tmodifiers')
+          for r in rows:
+              mods = set(filter(None, r['modifiers'].split(',')))
+              if {'view','pure'} & mods: continue
+              if not ({'onlyRole','auth','toll','onlyAdmin'} & mods):
+                  print('\t'.join(r[k] for k in ['file','line','function','visibility','modifiers']))
+          PY
+
+          grep -RInE 'TODO|FIXME|not integration tested|without integration testing|assum|unsafe|slither-disable|unchecked' \
+            target/src > evidence/warnings.txt || true
+
+          {
+            echo '=== Unprotected mutating entrypoints ==='
+            cat evidence/unprotected-mutating-entrypoints.tsv
+            echo
+            echo '=== Slither detector headlines ==='
+            grep -E '^INFO:Detectors:|Reference:|Impact:|Confidence:' evidence/slither.log | head -300 || true
+          } > evidence/summary.txt
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sky-adjacent-pau-surface-scan
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
