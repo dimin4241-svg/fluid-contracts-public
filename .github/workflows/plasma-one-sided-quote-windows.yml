@@ -1,0 +1,62 @@
+name: Plasma one-sided quote Windows
+
+on:
+  push:
+    branches:
+      - audit/plasma-one-sided-isolated-20260806
+    paths:
+      - '.github/workflows/plasma-one-sided-quote-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plasma-one-sided-quote-windows
+  cancel-in-progress: true
+
+jobs:
+  quote:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: 29082579
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Prepare isolated quote probe
+        shell: bash
+        run: |
+          rm -rf audit/quote
+          mkdir -p audit/quote/test audit/quote/lib evidence-quote
+          cp test/security/PlasmaT4OneSidedBorrowQuote.t.sol audit/quote/test/
+          cp -R lib/forge-std audit/quote/lib/forge-std
+      - name: Run pinned quote probe
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test --root audit/quote --via-ir \
+            --match-contract PlasmaT4OneSidedBorrowQuoteTest \
+            --match-test test_oneSidedBorrowQuotes -vvvv 2>&1 \
+            | tee evidence-quote/quote.log
+      - name: Extract quote evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(QuoteSurface|OneSidedBorrowQuote)\(|Suite result|Failing tests|Error:|revert' \
+            evidence-quote/quote.log | tee evidence-quote/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-quote/block.txt
+          git rev-parse HEAD > evidence-quote/commit.txt
+      - name: Upload quote evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-one-sided-borrow-quotes
+          path: evidence-quote/
+          if-no-files-found: error
+          retention-days: 30
