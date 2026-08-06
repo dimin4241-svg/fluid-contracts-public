@@ -1,0 +1,64 @@
+name: Security Sky D3M production probe
+
+on:
+  push:
+    branches: [audit/sky-ilk-registry-race-runner-20260806]
+    paths: ['.github/workflows/security-sky-d3m-production-probe.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Query live D3M state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          endpoints=(https://ethereum-rpc.publicnode.com https://eth.drpc.org https://mainnet.gateway.tenderly.co https://eth-mainnet.public.blastapi.io)
+          rpc=''
+          for x in "${endpoints[@]}"; do if cast block-number --rpc-url "$x" >/dev/null 2>&1; then rpc="$x"; break; fi; done
+          test -n "$rpc"
+          LOG=0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F
+          VAT=0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B
+          POOL=0xbf674d0cD6841C1d7f9b8E809B967B3C5E867653
+          PLAN=0xea2abB24bF40ac97746AFf6daCA0BBF885014b31
+          AUSDS=0x09AA30b182488f769a9824F15E6Ce58591Da4781
+          USDS=0xdC035D45d973E3EC169d2276DDab16f1e407384F
+          ILK=$(cast format-bytes32-string 'DIRECT-SPK-AAVE-LIDO-USDS')
+          HUB=$(cast call $LOG 'getAddress(bytes32)(address)' $(cast format-bytes32-string DIRECT_HUB) --rpc-url "$rpc")
+          {
+            echo rpc=$rpc
+            echo block=$(cast block-number --rpc-url "$rpc")
+            echo hub=$HUB
+            echo '=== hub config ==='
+            cast call $HUB 'ilks(bytes32)(address,address,uint256,uint256,uint256)' $ILK --rpc-url "$rpc"
+            echo '=== plan ==='
+            echo -n 'enabled '; cast call $PLAN 'enabled()(uint256)' --rpc-url "$rpc"
+            echo -n 'targetAssets '; cast call $PLAN 'targetAssets()(uint256)' --rpc-url "$rpc"
+            echo -n 'operator '; cast call $PLAN 'operator()(address)' --rpc-url "$rpc"
+            echo '=== vat ==='
+            cast call $VAT 'ilks(bytes32)(uint256,uint256,uint256,uint256,uint256)' $ILK --rpc-url "$rpc"
+            cast call $VAT 'urns(bytes32,address)(uint256,uint256)' $ILK $POOL --rpc-url "$rpc"
+            echo '=== pool ==='
+            echo -n 'assetBalance '; cast call $POOL 'assetBalance()(uint256)' --rpc-url "$rpc"
+            echo -n 'maxWithdraw '; cast call $POOL 'maxWithdraw()(uint256)' --rpc-url "$rpc"
+            echo -n 'aUSDS balance '; cast call $AUSDS 'balanceOf(address)(uint256)' $POOL --rpc-url "$rpc"
+            echo -n 'scaled aUSDS '; cast call $AUSDS 'scaledBalanceOf(address)(uint256)' $POOL --rpc-url "$rpc"
+            echo -n 'USDS in aToken '; cast call $USDS 'balanceOf(address)(uint256)' $AUSDS --rpc-url "$rpc"
+            echo -n 'USDS in pool '; cast call $USDS 'balanceOf(address)(uint256)' $POOL --rpc-url "$rpc"
+            echo '=== public exec simulation ==='
+            cast call $HUB 'exec(bytes32)' $ILK --rpc-url "$rpc" || true
+          } | tee evidence/probe.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sky-d3m-production-probe
+          path: evidence/
+          retention-days: 30
