@@ -34,6 +34,7 @@ jobs:
             echo
           }
 
+          query dex_tickers https://api.fluid.instadapp.io/v2/9745/dexes/stats/tickers
           query dexes_v2 https://api.fluid.instadapp.io/v2/9745/dexes
           query vaults_v2 https://api.fluid.instadapp.io/v2/9745/vaults
           query dexes_v1 https://api.fluid.instadapp.io/9745/dexes
@@ -58,10 +59,10 @@ jobs:
                       low = text.lower()
                       ids = ('id','dexId','dex_id','poolId','pool_id','vaultId','vault_id')
                       exact_id = any(str(x.get(k, '')) == '6' for k in ids)
-                      target_pair = 'usdc' in low and ('usdt0' in low or 'usdt' in low)
+                      target_pair = 'usdc' in low and ('usdt0' in low or 'usdt' in low or 'usd₮0' in low)
                       target_type = str(x.get('vaultType', x.get('vault_type', ''))) == '4'
                       if exact_id or target_pair or target_type:
-                          print(path, text[:5000])
+                          print(path, text[:8000])
                       for k,v in x.items(): walk(v, f'{path}.{k}')
                   elif isinstance(x, list):
                       for i,v in enumerate(x): walk(v, f'{path}[{i}]')
