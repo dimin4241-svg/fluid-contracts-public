@@ -1,0 +1,70 @@
+name: Security Plasma Smart Debt exact Windows
+
+on:
+  push:
+    branches:
+      - audit/plasma-smart-debt-exact-12386164
+    paths:
+      - 'test/security/PlasmaSmartDebtExactCloseInteraction.t.sol'
+      - '.github/workflows/security-plasma-smart-debt-exact-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plasma-smart-debt-exact-windows
+  cancel-in-progress: true
+
+jobs:
+  exact-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      PLASMA_RPC_URL: https://rpc.plasma.to
+      PLASMA_FORK_BLOCK: '12386164'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Prepare isolated exact Smart Debt harness
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf audit/plasma-smart-debt-exact evidence-smart-debt-exact
+          mkdir -p audit/plasma-smart-debt-exact/test audit/plasma-smart-debt-exact/lib evidence-smart-debt-exact
+          cp test/security/PlasmaSmartDebtExactCloseInteraction.t.sol audit/plasma-smart-debt-exact/test/
+          cp -R lib/forge-std audit/plasma-smart-debt-exact/lib/forge-std
+
+      - name: Run exact three-control fork proof
+        shell: bash
+        run: |
+          set -o pipefail
+          forge test \
+            --root audit/plasma-smart-debt-exact \
+            --via-ir \
+            --match-contract PlasmaSmartDebtExactCloseInteractionTest \
+            -vvvv 2>&1 | tee evidence-smart-debt-exact/forge.log
+
+      - name: Extract exact residual evidence
+        if: always()
+        shell: bash
+        run: |
+          grep -E '(Residual|Baseline|Perturb|Combined|CloseCost|Suite result|Failing tests|Error:|revert|FAIL|PASS)' \
+            evidence-smart-debt-exact/forge.log | tee evidence-smart-debt-exact/summary.log || true
+          echo "$PLASMA_FORK_BLOCK" > evidence-smart-debt-exact/block.txt
+          git rev-parse HEAD > evidence-smart-debt-exact/commit.txt
+
+      - name: Upload exact residual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plasma-smart-debt-exact-windows
+          path: evidence-smart-debt-exact/
+          if-no-files-found: error
+          retention-days: 30
