@@ -3,19 +3,45 @@ pragma solidity 0.8.21;
 
 import "../vaultT1/vault/vault.t.sol";
 import { TickMath } from "../../../contracts/libraries/tickMath.sol";
+import { FluidOracle } from "../../../contracts/oracle/fluidOracle.sol";
+
+contract SplitRateOracle is FluidOracle {
+    uint256 public operateRate;
+    uint256 public liquidateRate;
+
+    constructor(uint256 operateRate_, uint256 liquidateRate_) FluidOracle("split-rate-test", 39) {
+        operateRate = operateRate_;
+        liquidateRate = liquidateRate_;
+    }
+
+    function getExchangeRateOperate() external view override returns (uint256) {
+        return operateRate;
+    }
+
+    function getExchangeRateLiquidate() external view override returns (uint256) {
+        return liquidateRate;
+    }
+
+    function getExchangeRate() external view override returns (uint256) {
+        return liquidateRate;
+    }
+}
 
 contract BranchChainAbsorbDosTest is VaultT1BaseTest {
     uint256 internal constant X19 = 0x7ffff;
     uint256 internal constant X20 = 0xfffff;
     uint256 internal constant X30 = 0x3fffffff;
+    uint256 internal constant X96 = 0xffffffffffffffffffffffff;
     uint256 internal constant COLLATERAL_PER_BRANCH = 10_000; // $0.01 USDC
     uint256 internal constant INITIAL_DEBT = 7_990_000_000_000_000; // 0.00799 DAI
     uint256 internal constant PARTIAL_LIQUIDATION_AMOUNT = 1_000_000_000_000;
-    uint256 internal constant HEALTHY_PRICE = 1e39;
-    uint256 internal constant PARTIAL_LIQUIDATION_PRICE = (HEALTHY_PRICE * 98) / 100;
-    uint256 internal constant ABSORB_PRICE = (HEALTHY_PRICE * 80) / 100;
+    uint256 internal constant BASE_PRICE = 1e39;
+    uint256 internal constant OPERATE_PRICE = (BASE_PRICE * 1003) / 1000; // +0.30%
+    uint256 internal constant LIQUIDATE_PRICE = (BASE_PRICE * 98) / 100; // -2.00%
+    uint256 internal constant ABSORB_PRICE = (BASE_PRICE * 80) / 100;
     bytes4 internal constant ABSORB_SELECTOR = bytes4(keccak256("absorb()"));
 
+    SplitRateOracle internal splitOracle;
     uint256 internal blockGasCap;
     uint256 internal wideGasCap;
     uint256 internal totalBorrowed;
@@ -34,15 +60,25 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
         wideGasCap = blockGasCap * 8;
         if (wideGasCap < 300_000_000) wideGasCap = 300_000_000;
 
+        splitOracle = new SplitRateOracle(OPERATE_PRICE, LIQUIDATE_PRICE);
+        _replaceVaultOracle(address(splitOracle));
+
         deal(address(USDC), alice, 1_000_000 * 1e6);
         deal(address(DAI), bob, 1_000_000 * 1e18);
         _setApproval(USDC, address(vaultOne), alice);
         _setApproval(DAI, address(vaultOne), bob);
 
-        for (uint256 i = 1; i <= 1024; ++i) {
+        for (uint256 i = 1; i <= 2048; ++i) {
             _appendAndLiquidateBranch(i);
             if (i >= 32 && (i & (i - 1)) == 0) _checkpoint(i);
         }
+    }
+
+    function _replaceVaultOracle(address oracle_) internal {
+        bytes32 slot_ = bytes32(uint256(1));
+        uint256 raw_ = uint256(vm.load(address(vaultOne), slot_));
+        raw_ = (raw_ & X96) | (uint256(uint160(oracle_)) << 96);
+        vm.store(address(vaultOne), slot_, bytes32(raw_));
     }
 
     function _appendAndLiquidateBranch(uint256 expectedBranchId_) internal {
@@ -51,7 +87,6 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
             ? INITIAL_DEBT
             : _minimumDebtForTick(_topTick(rawBefore_));
 
-        oracleOne.setPrice(HEALTHY_PRICE);
         vm.prank(alice);
         vaultOne.operate(0, int256(COLLATERAL_PER_BRANCH), int256(debtAmount_), alice);
         totalBorrowed += debtAmount_;
@@ -64,7 +99,6 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
         if (expectedBranchId_ == 1) firstBranchTick = openedTick_;
         lastBranchTick = openedTick_;
 
-        oracleOne.setPrice(PARTIAL_LIQUIDATION_PRICE);
         vm.prank(bob);
         (uint256 actualDebt_, uint256 actualCol_) = vaultOne.liquidate(
             PARTIAL_LIQUIDATION_AMOUNT,
@@ -82,9 +116,17 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
     }
 
     function _checkpoint(uint256 branchCount_) internal {
-        oracleOne.setPrice(ABSORB_PRICE);
-        GasResult memory wide_ = _measureAbsorb(wideGasCap);
-        GasResult memory capped_ = _measureAbsorb(blockGasCap);
+        SplitRateOracle toxicOracle_ = new SplitRateOracle(ABSORB_PRICE, ABSORB_PRICE);
+        uint256 snapshot_ = vm.snapshot();
+        _replaceVaultOracle(address(toxicOracle_));
+
+        GasResult memory wide_ = _measureAbsorbNoSnapshot(wideGasCap);
+        assertTrue(vm.revertTo(snapshot_), "wide snapshot restore failed");
+
+        snapshot_ = vm.snapshot();
+        _replaceVaultOracle(address(toxicOracle_));
+        GasResult memory capped_ = _measureAbsorbNoSnapshot(blockGasCap);
+        assertTrue(vm.revertTo(snapshot_), "capped snapshot restore failed");
 
         assertTrue(wide_.completed, "wide-cap absorb must complete");
         if (previousWideGas != 0) {
@@ -103,8 +145,6 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
         emit log_named_uint("block-capped absorb completed", capped_.completed ? 1 : 0);
         emit log_named_uint("block-capped call gas", capped_.gasUsed);
         emit log_named_uint("block-capped return bytes", capped_.returnDataLength);
-
-        oracleOne.setPrice(HEALTHY_PRICE);
     }
 
     function _minimumDebtForTick(int256 targetTick_) internal pure returns (uint256 debtAmount_) {
@@ -115,8 +155,7 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
         debtAmount_ += 1000;
     }
 
-    function _measureAbsorb(uint256 gasCap_) internal returns (GasResult memory result_) {
-        uint256 snapshot_ = vm.snapshot();
+    function _measureAbsorbNoSnapshot(uint256 gasCap_) internal returns (GasResult memory result_) {
         bytes memory returnData_;
         uint256 gasBefore_ = gasleft();
         (result_.completed, returnData_) = address(vaultOne).call{ gas: gasCap_ }(
@@ -124,7 +163,6 @@ contract BranchChainAbsorbDosTest is VaultT1BaseTest {
         );
         result_.gasUsed = gasBefore_ - gasleft();
         result_.returnDataLength = returnData_.length;
-        assertTrue(vm.revertTo(snapshot_), "snapshot restore failed");
     }
 
     function _vaultVariables() internal view returns (uint256) {
