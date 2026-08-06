@@ -13,8 +13,8 @@ contract AbsorbGasDosTest is VaultsBaseTest {
     uint256 internal constant INITIAL_DEBT_AMOUNT = 10_000; // 0.01 USDC, protocol minimum
     uint256 internal constant DEBT_GROWTH_NUMERATOR = 10020; // +0.20%, above one 0.15% vault tick
     uint256 internal constant DEBT_GROWTH_DENOMINATOR = 10000;
-    uint256 internal constant ATTACK_ORACLE_PRICE = 1e22;
-    uint256 internal constant HEALTHY_ORACLE_PRICE = 1e27;
+    uint256 internal constant ATTACK_ORACLE_PRICE = 1;
+    uint256 internal constant HEALTHY_ORACLE_PRICE = 1e15;
 
     bytes4 internal constant SIMULATE_LIQUIDATE_SELECTOR = bytes4(keccak256("simulateLiquidate(uint256,bool)"));
     bytes4 internal constant LIQUIDATE_RESULT_SELECTOR = bytes4(keccak256("FluidLiquidateResult(uint256,uint256)"));
