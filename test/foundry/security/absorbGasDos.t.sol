@@ -116,10 +116,9 @@ contract AbsorbGasDosTest is VaultsBaseTest {
             true
         );
 
+        bytes memory returnData_;
         uint256 gasBefore_ = gasleft();
-        (result_.completed, bytes memory returnData_) = address(DAI_USDC_VAULT.vaultT4).call{ gas: gasCap_ }(
-            payload_
-        );
+        (result_.completed, returnData_) = address(DAI_USDC_VAULT.vaultT4).call{ gas: gasCap_ }(payload_);
         result_.gasUsed = gasBefore_ - gasleft();
         result_.returnDataLength = returnData_.length;
 
