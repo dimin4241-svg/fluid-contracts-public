@@ -40,3 +40,5 @@ jobs:
           git add fsl-watch-result.json fsl-watch-exit-code.txt
           git commit -m 'Record fSL feeOrReward snapshot' || exit 0
           git push origin HEAD:audit/read-only-dex-fees-20260805
+
+# automation refresh marker: 2026-08-07T18:55Z
