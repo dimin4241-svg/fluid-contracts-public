@@ -1,0 +1,113 @@
+name: fSL feeOrReward canonical probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fsl-fee-probe-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe all canonical Routescan URLs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.error
+          from datetime import datetime, timezone
+
+          selector = '0xe47a882d'
+          targets = [
+            ('Base',8453,'0x4563134183e45D9502015db14B263E31781099bB','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB'),
+            ('Base',8453,'0x983107BB3dcb71f3A30176114D8a17c454A62514','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514'),
+            ('Base',8453,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),
+            ('Base',8453,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+            ('Plasma',9745,'0x983107BB3dcb71f3A30176114D8a17c454A62514','https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514'),
+            ('Plasma',9745,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+            ('Polygon',137,'0xa779B6736385930145F4856226Cd3E3691B72458','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xa779B6736385930145F4856226Cd3E3691B72458'),
+            ('Polygon',137,'0x4563134183e45D9502015db14B263E31781099bB','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB'),
+            ('Polygon',137,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),
+            ('Polygon',137,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+            ('Arbitrum',42161,'0x82C53239c4CFC89A8E55A691422af24c18A944b1','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x82C53239c4CFC89A8E55A691422af24c18A944b1'),
+            ('Arbitrum',42161,'0x1F0bFd9862ae58208d26db0d80797974434EC013','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x1F0bFd9862ae58208d26db0d80797974434EC013'),
+            ('Arbitrum',42161,'0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E'),
+            ('Ethereum',1,'0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1'),
+            ('Ethereum',1,'0x9b1f75ea07723F331996831f6d04AD4900d1A3B3','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x9b1f75ea07723F331996831f6d04AD4900d1A3B3'),
+            ('Ethereum',1,'0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF'),
+            ('Ethereum',1,'0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2'),
+            ('Ethereum',1,'0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f'),
+            ('Ethereum',1,'0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6'),
+            ('Ethereum',1,'0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70'),
+            ('Ethereum',1,'0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c'),
+          ]
+          fallbacks = {
+            1:['https://ethereum-rpc.publicnode.com','https://rpc.ankr.com/eth'],
+            8453:['https://base-rpc.publicnode.com','https://mainnet.base.org'],
+            137:['https://polygon-bor-rpc.publicnode.com','https://polygon-rpc.com'],
+            42161:['https://arbitrum-one-rpc.publicnode.com','https://arb1.arbitrum.io/rpc'],
+            9745:['https://rpc.plasma.to','https://plasma-rpc.publicnode.com'],
+          }
+          def geti(url):
+            req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 fsl-probe'})
+            with urllib.request.urlopen(req,timeout=30) as r:
+              return json.loads(r.read().decode())
+          def rpc(url,address):
+            body=json.dumps({'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':address,'data':selector},'latest']}).encode()
+            req=urllib.request.Request(url,data=body,headers={'Content-Type':'application/json','User-Agent':'Mozilla/5.0 fsl-probe'})
+            with urllib.request.urlopen(req,timeout=30) as r:
+              return json.loads(r.read().decode())
+          def decode(s):
+            v=int(s,16)&0xffffffff
+            return v-(1<<32) if v&0x80000000 else v
+          rows=[]
+          for network,cid,address,url in targets:
+            row={'network':network,'chain_id':cid,'address':address,'canonical_url':url}
+            try:
+              p=geti(url); res=p.get('result')
+              if not isinstance(res,str) or not res.startswith('0x'):
+                raise RuntimeError('bad payload '+repr(p))
+              row.update({'canonical_ok':True,'result':res,'raw_int32':decode(res),'annual_percent':decode(res)/10000})
+            except Exception as e:
+              row.update({'canonical_ok':False,'canonical_error':repr(e)})
+              for f in fallbacks.get(cid,[]):
+                try:
+                  p=rpc(f,address); res=p.get('result')
+                  if not isinstance(res,str) or not res.startswith('0x'):
+                    raise RuntimeError('bad payload '+repr(p))
+                  row.update({'fallback_ok':True,'fallback_source':f,'result':res,'raw_int32':decode(res),'annual_percent':decode(res)/10000})
+                  break
+                except Exception as fe:
+                  row.setdefault('fallback_errors',[]).append(f+': '+repr(fe))
+            rows.append(row)
+          # Independently confirm any nonzero values regardless of canonical success.
+          for row in rows:
+            if row.get('raw_int32',0)!=0:
+              confirms=[]
+              for f in fallbacks.get(row['chain_id'],[]):
+                try:
+                  p=rpc(f,row['address']); res=p.get('result')
+                  if isinstance(res,str) and res.startswith('0x'):
+                    confirms.append({'rpc':f,'result':res,'raw_int32':decode(res),'annual_percent':decode(res)/10000})
+                except Exception as e:
+                  confirms.append({'rpc':f,'error':repr(e)})
+              row['independent_confirmations']=confirms
+          out={'checked_at_utc':datetime.now(timezone.utc).isoformat(),'target_count':len(rows),'rows':rows}
+          out['unconfirmed_count']=sum(1 for r in rows if 'raw_int32' not in r)
+          out['nonzero']= [r for r in rows if r.get('raw_int32',0)!=0]
+          import os
+          os.makedirs('security',exist_ok=True)
+          with open('security/fsl-rate-probe-output.json','w') as f: json.dump(out,f,indent=2)
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Commit probe output
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add security/fsl-rate-probe-output.json
+          git commit -m 'Record fSL feeOrReward probe output' || exit 0
+          git push
