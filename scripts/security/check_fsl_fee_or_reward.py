@@ -141,3 +141,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+# automation refresh marker: 2026-08-07T10:54Z
