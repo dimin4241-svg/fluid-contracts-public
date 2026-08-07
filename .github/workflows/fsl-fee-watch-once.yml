@@ -1,6 +1,9 @@
 name: fSL feeOrReward one-shot
 
 on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -11,6 +14,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,7 +26,8 @@ jobs:
         continue-on-error: true
         run: |
           python scripts/security/check_fsl_fee_or_reward.py > fsl-results.json
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
       - name: Print result
         if: always()
         run: cat fsl-results.json
