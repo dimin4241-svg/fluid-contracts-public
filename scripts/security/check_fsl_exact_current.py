@@ -82,3 +82,5 @@ def main():
     print(json.dumps(out,indent=2))
     return 2 if failures else 0
 if __name__=='__main__': raise SystemExit(main())
+
+# automation refresh marker: 2026-08-07T19:59:10Z
