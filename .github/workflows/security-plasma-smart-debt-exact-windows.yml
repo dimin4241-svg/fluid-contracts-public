@@ -46,6 +46,11 @@ jobs:
           rm -rf audit/plasma-smart-debt-exact evidence-smart-debt-exact
           mkdir -p audit/plasma-smart-debt-exact/test audit/plasma-smart-debt-exact/lib evidence-smart-debt-exact
           cp test/security/PlasmaSmartDebtExactCloseInteraction.t.sol audit/plasma-smart-debt-exact/test/
+          sed -i \
+            -e 's/0x6e0cdb5c21b3c8e340e9c9210057035bafa86fff/0x6E0Cdb5c21B3c8E340E9C9210057035bAfA86ffF/g' \
+            -e 's/0xbd5dd095d9a6565c8222bb36b5814953f1c46f71/0xbd5dD095d9a6565C8222bb36B5814953F1C46f71/g' \
+            -e 's/, REPAY_FUNDING, true);/, REPAY_FUNDING);/g' \
+            audit/plasma-smart-debt-exact/test/PlasmaSmartDebtExactCloseInteraction.t.sol
           cp -R lib/forge-std audit/plasma-smart-debt-exact/lib/forge-std
 
       - name: Run exact three-control fork proof
