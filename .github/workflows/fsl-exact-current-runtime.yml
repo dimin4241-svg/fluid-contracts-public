@@ -38,3 +38,5 @@ jobs:
           git add automation/fsl-current-result.json automation/fsl-current-exit.txt
           git diff --cached --quiet || git commit -m "Record current exact fSL verification"
           git push origin HEAD:main
+
+# runtime trigger 2026-08-07T13:02Z
