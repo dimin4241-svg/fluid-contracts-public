@@ -1,0 +1,40 @@
+name: Check fSL feeOrReward
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/check-fsl-fee-or-reward.yml'
+      - 'scripts/security/check_fsl_fee_or_reward.py'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install requests
+        run: python -m pip install requests
+      - name: Run exact 21-target on-chain check
+        shell: bash
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py | tee fsl_fee_or_reward_stdout.txt
+          code=${PIPESTATUS[0]}
+          echo "$code" > fsl_fee_or_reward_exit_code.txt
+          exit 0
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsl-fee-or-reward-result
+          path: |
+            fsl_fee_or_reward_results.json
+            fsl_fee_or_reward_stdout.txt
+            fsl_fee_or_reward_exit_code.txt
+          if-no-files-found: warn
