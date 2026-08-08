@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import sys
 import time
@@ -35,12 +36,15 @@ TARGETS = [
 ]
 
 FALLBACK_RPCS = {
-    1: ["https://ethereum-rpc.publicnode.com", "https://rpc.ankr.com/eth"],
+    1: ["https://ethereum-rpc.publicnode.com", "https://eth.llamarpc.com", "https://rpc.ankr.com/eth"],
     8453: ["https://base-rpc.publicnode.com", "https://mainnet.base.org"],
     137: ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"],
     42161: ["https://arbitrum-one-rpc.publicnode.com", "https://arb1.arbitrum.io/rpc"],
     9745: ["https://rpc.plasma.to", "https://plasma.drpc.org"],
 }
+
+TIMEOUT = 8
+PRIMARY_ATTEMPTS = 2
 
 
 def decode_int32(result: str) -> int:
@@ -48,98 +52,137 @@ def decode_int32(result: str) -> int:
     return value - (1 << 32) if value & 0x80000000 else value
 
 
-def get_routescan(session: requests.Session, url: str) -> str:
-    last = None
-    for attempt in range(3):
-        try:
-            r = session.get(url, timeout=30)
-            r.raise_for_status()
-            body = r.json()
-            result = body.get("result")
-            if isinstance(result, str) and result.startswith("0x"):
-                return result
-            last = RuntimeError(f"invalid Routescan payload: {body}")
-        except Exception as exc:
-            last = exc
-        time.sleep(1 + attempt)
-    raise RuntimeError(str(last))
-
-
-def get_rpc(session: requests.Session, rpc: str, address: str) -> str:
-    payload = {"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":address,"data":SELECTOR},"latest"]}
-    r = session.post(rpc, json=payload, timeout=30)
-    r.raise_for_status()
-    body = r.json()
+def valid_result(body: object) -> str:
+    if not isinstance(body, dict):
+        raise RuntimeError(f"non-object payload: {body!r}")
     result = body.get("result")
     if not isinstance(result, str) or not result.startswith("0x"):
-        raise RuntimeError(f"invalid RPC payload: {body}")
+        raise RuntimeError(f"invalid payload: {body}")
+    int(result, 16)
     return result
 
 
-def first_fallback(session: requests.Session, chain_id: int, address: str):
-    errors = []
-    for rpc in FALLBACK_RPCS.get(chain_id, []):
+def routescan_call(url: str) -> str:
+    last = None
+    for attempt in range(PRIMARY_ATTEMPTS):
         try:
-            return get_rpc(session, rpc, address), rpc
+            r = requests.get(url, timeout=TIMEOUT, headers={"User-Agent": "fluid-fsl-rate-watch/3.0"})
+            r.raise_for_status()
+            return valid_result(r.json())
+        except Exception as exc:
+            last = exc
+            if attempt + 1 < PRIMARY_ATTEMPTS:
+                time.sleep(0.75)
+    raise RuntimeError(str(last))
+
+
+def rpc_call(rpc: str, address: str) -> str:
+    payload = {"jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [{"to": address, "data": SELECTOR}, "latest"]}
+    r = requests.post(rpc, json=payload, timeout=TIMEOUT, headers={"User-Agent": "fluid-fsl-rate-watch/3.0"})
+    r.raise_for_status()
+    return valid_result(r.json())
+
+
+def fallback_call(chain_id: int, address: str, exclude: set[str] | None = None) -> tuple[str, str]:
+    errors = []
+    exclude = exclude or set()
+    for rpc in FALLBACK_RPCS.get(chain_id, []):
+        if rpc in exclude:
+            continue
+        try:
+            return rpc_call(rpc, address), rpc
         except Exception as exc:
             errors.append(f"{rpc}: {exc}")
     raise RuntimeError("; ".join(errors))
 
 
-def main() -> int:
-    s = requests.Session()
-    s.headers.update({"User-Agent":"fluid-fsl-rate-watch/2.0"})
-    checked_at = datetime.now(timezone.utc).isoformat()
-    rows, failures, nonzero = [], [], []
-
-    for network, chain_id, address, url in TARGETS:
-        primary_source = "routescan"
-        independent = None
+def check_one(target: tuple[str, int, str, str], checked_at: str) -> tuple[dict | None, dict | None]:
+    network, chain_id, address, url = target
+    primary_result = None
+    source = "routescan"
+    source_rpc = None
+    routescan_error = None
+    try:
         try:
-            try:
-                result = get_routescan(s, url)
-            except Exception as routescan_error:
-                result, primary_source = first_fallback(s, chain_id, address)
-                primary_source = f"fallback:{primary_source} (Routescan failed: {routescan_error})"
-
-            raw = decode_int32(result)
-            confirmed = True
-            if raw != 0:
-                second_result, second_rpc = first_fallback(s, chain_id, address)
-                independent = {"rpc": second_rpc, "result": second_result, "raw_int32": decode_int32(second_result)}
-                confirmed = second_result.lower() == result.lower() and independent["raw_int32"] == raw
-                if not confirmed:
-                    raise RuntimeError(f"nonzero mismatch primary={result} independent={independent}")
-
-            row = {
-                "network": network,
-                "chain_id": chain_id,
-                "address": address,
-                "canonical_routescan_url": url,
-                "source": primary_source,
-                "result": result,
-                "raw_int32": raw,
-                "annual_percent": raw / 10000,
-                "checked_at_utc": checked_at,
-                "confirmed": confirmed,
-                "independent_confirmation": independent,
-            }
-            rows.append(row)
-            if raw != 0 and confirmed:
-                nonzero.append(row)
+            primary_result = routescan_call(url)
         except Exception as exc:
-            failures.append({"network":network,"chain_id":chain_id,"address":address,"canonical_routescan_url":url,"error":str(exc)})
+            routescan_error = str(exc)
+            primary_result, source_rpc = fallback_call(chain_id, address)
+            source = f"fallback:{source_rpc}"
 
-    output = {"checked_at_utc":checked_at,"target_count":len(TARGETS),"success_count":len(rows),"failure_count":len(failures),"nonzero":nonzero,"results":rows,"failures":failures}
-    with open("fsl_fee_or_reward_results.json","w",encoding="utf-8") as f:
-        json.dump(output,f,indent=2)
-    print(json.dumps(output,indent=2))
+        raw = decode_int32(primary_result)
+        independent = None
+        if raw != 0:
+            exclude = {source_rpc} if source_rpc else set()
+            second_result, second_rpc = fallback_call(chain_id, address, exclude=exclude)
+            second_raw = decode_int32(second_result)
+            independent = {"rpc": second_rpc, "result": second_result, "raw_int32": second_raw}
+            if second_raw != raw:
+                raise RuntimeError(f"nonzero mismatch primary={primary_result} raw={raw} independent={independent}")
+
+        row = {
+            "network": network,
+            "chain_id": chain_id,
+            "address": address,
+            "canonical_routescan_url": url,
+            "source": source,
+            "routescan_error": routescan_error,
+            "result": primary_result,
+            "raw_int32": raw,
+            "annual_percent": raw / 10000,
+            "checked_at_utc": checked_at,
+            "confirmed": True,
+            "independent_confirmation": independent,
+        }
+        return row, None
+    except Exception as exc:
+        return None, {
+            "network": network,
+            "chain_id": chain_id,
+            "address": address,
+            "canonical_routescan_url": url,
+            "error": str(exc),
+        }
+
+
+def main() -> int:
+    checked_at = datetime.now(timezone.utc).isoformat()
+    rows: list[dict] = []
+    failures: list[dict] = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(TARGETS)) as pool:
+        futures = [pool.submit(check_one, target, checked_at) for target in TARGETS]
+        for future in futures:
+            row, failure = future.result()
+            if row is not None:
+                rows.append(row)
+            if failure is not None:
+                failures.append(failure)
+
+    order = {(network, chain_id, address): i for i, (network, chain_id, address, _) in enumerate(TARGETS)}
+    rows.sort(key=lambda r: order[(r["network"], r["chain_id"], r["address"])])
+    failures.sort(key=lambda r: order[(r["network"], r["chain_id"], r["address"])])
+    nonzero = [r for r in rows if r["raw_int32"] != 0 and r["confirmed"]]
+
+    output = {
+        "checked_at_utc": checked_at,
+        "target_count": len(TARGETS),
+        "success_count": len(rows),
+        "failure_count": len(failures),
+        "nonzero": nonzero,
+        "results": rows,
+        "failures": failures,
+    }
+    with open("fsl_fee_or_reward_results.json", "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2)
+    print(json.dumps(output, indent=2))
 
     if failures:
         return 2
     return 10 if nonzero else 0
 
+
 if __name__ == "__main__":
     raise SystemExit(main())
 
-# automation refresh marker: 2026-08-07T10:54Z
+# automation refresh marker: 2026-08-08T07:53Z
