@@ -36,3 +36,5 @@ jobs:
         with:
           name: fsl-results
           path: fsl-results.json
+
+# automation refresh marker: 2026-08-08T00:50Z
