@@ -1,0 +1,2 @@
+Fresh exhaustive fSL feeOrReward verification requested at 2026-08-08T00:50Z.
+Use the repository's existing read-only checker and exact 21 canonical Routescan endpoints.
