@@ -7,6 +7,12 @@ on:
     paths:
       - '.github/workflows/fsl-fee-check.yml'
       - 'scripts/security/check_fsl_fee_or_reward.py'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/fsl-fee-check.yml'
+      - 'scripts/security/check_fsl_fee_or_reward.py'
 
 permissions:
   contents: write
@@ -31,8 +37,11 @@ jobs:
           python scripts/security/check_fsl_fee_or_reward.py > artifacts/fsl-fee-check-latest.json
           code=$?
           echo "$code" > artifacts/fsl-fee-check-exit-code.txt
+          cat artifacts/fsl-fee-check-latest.json
+          echo "checker_exit=$code"
           exit 0
       - name: Commit result
+        if: github.event_name == 'push'
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
