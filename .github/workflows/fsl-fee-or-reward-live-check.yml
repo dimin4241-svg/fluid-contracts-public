@@ -1,0 +1,32 @@
+name: fSL feeOrReward live check
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/fsl-fee-or-reward-live-check.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Run all 21 canonical checks
+        shell: bash
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py | tee fsl-check.json
+          code=${PIPESTATUS[0]}
+          echo "checker_exit_code=$code"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fsl-check
+          path: fsl-check.json
+          if-no-files-found: error
