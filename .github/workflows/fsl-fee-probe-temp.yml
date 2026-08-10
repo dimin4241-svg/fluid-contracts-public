@@ -83,7 +83,6 @@ jobs:
                 except Exception as fe:
                   row.setdefault('fallback_errors',[]).append(f+': '+repr(fe))
             rows.append(row)
-          # Independently confirm any nonzero values regardless of canonical success.
           for row in rows:
             if row.get('raw_int32',0)!=0:
               confirms=[]
@@ -111,3 +110,5 @@ jobs:
           git add security/fsl-rate-probe-output.json
           git commit -m 'Record fSL feeOrReward probe output' || exit 0
           git push
+
+# automation probe trigger 2026-08-10T06:56:32Z
