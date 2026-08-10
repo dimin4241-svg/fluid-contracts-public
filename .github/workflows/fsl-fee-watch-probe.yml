@@ -1,6 +1,9 @@
 name: fSL feeOrReward probe
 
 on:
+  push:
+    branches: [audit/read-only-dex-fees-20260805]
+    paths: ['.github/workflows/fsl-fee-watch-probe.yml']
   pull_request:
     branches: [main]
   workflow_dispatch:
