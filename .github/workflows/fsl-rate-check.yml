@@ -1,0 +1,32 @@
+name: fSL rate check
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/fsl-rate-check.yml'
+      - 'scripts/security/check_fsl_fee_or_reward.py'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests
+      - name: Run fSL on-chain check
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py | tee fsl-check.json
+          code=${PIPESTATUS[0]}
+          echo "checker_exit_code=$code"
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fsl-check
+          path: fsl-check.json
