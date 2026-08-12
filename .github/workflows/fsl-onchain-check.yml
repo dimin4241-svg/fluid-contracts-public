@@ -1,0 +1,26 @@
+name: fSL on-chain feeOrReward check
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/fsl-onchain-check.yml'
+      - 'scripts/security/check_fsl_fee_or_reward.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Check all fSL feeOrReward values
+        run: python scripts/security/check_fsl_fee_or_reward.py
