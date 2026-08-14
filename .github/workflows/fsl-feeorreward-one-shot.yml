@@ -1,0 +1,25 @@
+name: fSL feeOrReward one-shot
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/fsl-feeorreward-one-shot.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install requests
+        run: python -m pip install --disable-pip-version-check requests
+      - name: Check all fSL feeOrReward values
+        shell: bash
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py 2>&1 | tee fsl-check-output.json
+          code=${PIPESTATUS[0]}
+          echo "checker_exit_code=$code"
+          exit 0
