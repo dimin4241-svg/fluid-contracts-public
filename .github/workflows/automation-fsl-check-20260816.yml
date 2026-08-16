@@ -72,3 +72,5 @@ jobs:
           if summary["unconfirmed"]: raise SystemExit(2)
           if summary["nonzero"]: raise SystemExit(10)
           PY
+
+# automation-trigger 2026-08-16T22:49:26Z
