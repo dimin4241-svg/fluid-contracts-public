@@ -34,3 +34,5 @@ jobs:
             fsl-output.json
             fsl-stderr.txt
             fsl-exit-code.txt
+
+# automation refresh 2026-08-16
