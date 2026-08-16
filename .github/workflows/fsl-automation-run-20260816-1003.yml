@@ -1,0 +1,91 @@
+name: fSL automation current check 20260816-1003
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fsl-automation-run-20260816-1003.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all 21 exact Routescan URLs
+        shell: bash
+        run: |
+          python - <<'PY'
+          import concurrent.futures, datetime, json, urllib.request
+
+          selector='0xe47a882d'
+          text='''
+          Base|8453|0x4563134183e45D9502015db14B263E31781099bB|https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB
+          Base|8453|0x983107BB3dcb71f3A30176114D8a17c454A62514|https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514
+          Base|8453|0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6|https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6
+          Base|8453|0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A|https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A
+          Plasma|9745|0x983107BB3dcb71f3A30176114D8a17c454A62514|https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514
+          Plasma|9745|0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A|https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A
+          Polygon|137|0xa779B6736385930145F4856226Cd3E3691B72458|https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xa779B6736385930145F4856226Cd3E3691B72458
+          Polygon|137|0x4563134183e45D9502015db14B263E31781099bB|https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB
+          Polygon|137|0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6|https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6
+          Polygon|137|0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A|https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A
+          Arbitrum|42161|0x82C53239c4CFC89A8E55A691422af24c18A944b1|https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x82C53239c4CFC89A8E55A691422af24c18A944b1
+          Arbitrum|42161|0x1F0bFd9862ae58208d26db0d80797974434EC013|https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x1F0bFd9862ae58208d26db0d80797974434EC013
+          Arbitrum|42161|0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E|https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E
+          Ethereum|1|0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1|https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1
+          Ethereum|1|0x9b1f75ea07723F331996831f6d04AD4900d1A3B3|https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x9b1f75ea07723F331996831f6d04AD4900d1A3B3
+          Ethereum|1|0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF|https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF
+          Ethereum|1|0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2|https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2
+          Ethereum|1|0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f|https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f
+          Ethereum|1|0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6|https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6
+          Ethereum|1|0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70|https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70
+          Ethereum|1|0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c|https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c
+          '''
+          targets=[]
+          for line in text.splitlines():
+              line=line.strip()
+              if line:
+                  net,cid,addr,url=line.split('|',3); targets.append((net,int(cid),addr,url))
+          rpcs={8453:['https://base-rpc.publicnode.com','https://mainnet.base.org'],9745:['https://rpc.plasma.to','https://plasma.drpc.org'],137:['https://polygon-bor-rpc.publicnode.com','https://polygon-rpc.com'],42161:['https://arbitrum-one-rpc.publicnode.com','https://arb1.arbitrum.io/rpc'],1:['https://ethereum-rpc.publicnode.com','https://eth.llamarpc.com']}
+          def dec(h):
+              x=int(h,16)&0xffffffff
+              return x-(1<<32) if x&0x80000000 else x
+          def get(url):
+              req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=20) as r: return json.loads(r.read().decode())
+          def rpc(url,addr):
+              p=json.dumps({'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':addr,'data':selector},'latest']}).encode()
+              req=urllib.request.Request(url,data=p,headers={'Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=20) as r: return json.loads(r.read().decode())
+          def check(t):
+              net,cid,addr,url=t; row={'network':net,'chain_id':cid,'address':addr,'url':url,'checked_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+              try:
+                  j=get(url); res=j.get('result')
+                  if not(isinstance(res,str) and res.startswith('0x')): raise RuntimeError(str(j))
+                  row.update(routescan_ok=True,result=res,raw=dec(res),annual_percent=dec(res)/10000)
+              except Exception as e:
+                  row.update(routescan_ok=False,routescan_error=repr(e))
+              if (not row.get('routescan_ok')) or row.get('raw')!=0:
+                  fb=[]
+                  for u in rpcs[cid]:
+                      try:
+                          j=rpc(u,addr); res=j.get('result')
+                          if not(isinstance(res,str) and res.startswith('0x')): raise RuntimeError(str(j))
+                          fb.append({'rpc':u,'result':res,'raw':dec(res),'annual_percent':dec(res)/10000})
+                      except Exception as e: fb.append({'rpc':u,'error':repr(e)})
+                  row['fallbacks']=fb
+              return row
+          with concurrent.futures.ThreadPoolExecutor(max_workers=21) as ex: rows=list(ex.map(check,targets))
+          unresolved=[]; nonzero=[]
+          for row in rows:
+              print('ROW '+json.dumps(row,sort_keys=True),flush=True)
+              if row.get('routescan_ok'):
+                  if row['raw']!=0:
+                      confirmed=[x for x in row.get('fallbacks',[]) if x.get('raw')==row['raw']]
+                      (nonzero if confirmed else unresolved).append(row)
+              else:
+                  vals=[x for x in row.get('fallbacks',[]) if 'raw' in x]
+                  raws={x['raw'] for x in vals}
+                  if len(raws)!=1: unresolved.append(row)
+                  elif next(iter(raws))!=0: nonzero.append(row)
+          print('SUMMARY '+json.dumps({'target_count':len(rows),'nonzero':nonzero,'unresolved':unresolved,'completed_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()},sort_keys=True),flush=True)
+          if unresolved: raise SystemExit(2)
+          PY
