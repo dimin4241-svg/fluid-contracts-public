@@ -1,0 +1,23 @@
+name: fSL feeOrReward canonical check 2026-08-18 0252
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - .github/workflows/fsl-fee-check-20260818-0252.yml
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Check all 21 exact canonical URLs with RPC fallback
+        run: python scripts/security/check_fsl_fee_or_reward.py
