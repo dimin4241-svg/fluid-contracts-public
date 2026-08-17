@@ -1,0 +1,38 @@
+name: fSL feeOrReward canonical check with persisted output 2026-08-18 0256
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - .github/workflows/fsl-fee-check-output-20260818-0256.yml
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Check all 21 exact canonical URLs and persist output
+        shell: bash
+        run: |
+          mkdir -p security-results
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py > security-results/fsl-20260818-0256.json 2> security-results/fsl-20260818-0256.stderr
+          code=$?
+          set -e
+          printf '%s\n' "$code" > security-results/fsl-20260818-0256.exit
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add security-results/fsl-20260818-0256.json security-results/fsl-20260818-0256.stderr security-results/fsl-20260818-0256.exit
+          git commit -m 'Persist fSL feeOrReward check output 2026-08-18 02:56 +05' || true
+          git push origin HEAD:audit/read-only-dex-fees-20260805
