@@ -109,3 +109,5 @@ jobs:
 
           out={"checked_at_utc":checked_at,"target_count":len(targets),"success_count":len(rows),"failure_count":len(failures),"nonzero":[r for r in rows if r["raw_int32"]!=0],"results":rows,"failures":failures}
           print("FSL_RESULT_JSON="+json.dumps(out,separators=(",",":")))
+
+# automation refresh 2026-08-17T16:58:08Z
