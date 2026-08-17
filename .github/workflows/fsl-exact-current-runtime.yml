@@ -6,10 +6,6 @@ on:
     paths:
       - '.github/workflows/fsl-exact-current-runtime.yml'
       - 'scripts/security/check_fsl_exact_current.py'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'automation/fsl-trigger.txt'
   workflow_dispatch:
 
 jobs:
