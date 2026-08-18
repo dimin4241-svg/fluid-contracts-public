@@ -4,12 +4,15 @@ on:
   push:
     branches:
       - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/fsl-fee-watch-once.yml'
+      - 'scripts/security/check_fsl_fee_or_reward.py'
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   check:
@@ -17,6 +20,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -31,10 +36,22 @@ jobs:
       - name: Print result
         if: always()
         run: cat fsl-results.json
+      - name: Persist latest result on audit branch
+        if: always()
+        run: |
+          mkdir -p .automation
+          cp fsl-results.json .automation/fsl-fee-results.json
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .automation/fsl-fee-results.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: refresh fSL fee check result [skip ci]"
+            git push origin HEAD:audit/read-only-dex-fees-20260805
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: fsl-results
           path: fsl-results.json
 
-# automation refresh marker: 2026-08-18T01:03:00Z
+# automation refresh marker: 2026-08-18T01:07:30Z
