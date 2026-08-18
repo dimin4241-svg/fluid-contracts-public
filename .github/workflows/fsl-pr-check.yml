@@ -1,0 +1,14 @@
+name: fSL exact feeOrReward PR check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run exact 21-target checker
+        run: python3 scripts/security/fsl_feeorreward_check_exact.py
