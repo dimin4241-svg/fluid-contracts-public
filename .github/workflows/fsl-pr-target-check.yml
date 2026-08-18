@@ -1,0 +1,30 @@
+name: fSL exact checker result writer
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted base branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Run exact 21-target checker
+        run: |
+          mkdir -p automation-results
+          python3 scripts/security/fsl_feeorreward_check_exact.py > automation-results/fsl-current.json
+          cat automation-results/fsl-current.json
+      - name: Commit result to main
+        run: |
+          git config user.name 'fsl-check-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add automation-results/fsl-current.json
+          git commit -m 'Record current fSL feeOrReward check' || exit 0
+          git push origin HEAD:main
