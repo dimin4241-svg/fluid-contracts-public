@@ -52,7 +52,7 @@ def decode_int32(result: str) -> int:
 def routescan_url(chain_id: int, address: str) -> str:
     return (
         f"https://api.routescan.io/v2/network/mainnet/evm/{chain_id}/etherscan/api"
-        f"?module=proxy&action=eth_call&to={address}&data={SELECTOR}&tag=latest"
+        f"?action=eth_call&data={SELECTOR}&module=proxy&tag=latest&to={address}"
     )
 
 
