@@ -8,6 +8,10 @@ on:
     paths:
       - '.github/workflows/fsl-fee-or-reward-check.yml'
       - 'scripts/security/check_fsl_fee_or_reward.py'
+  pull_request:
+    paths:
+      - '.github/workflows/fsl-fee-or-reward-check.yml'
+      - 'scripts/security/check_fsl_fee_or_reward.py'
   workflow_dispatch:
 
 permissions:
