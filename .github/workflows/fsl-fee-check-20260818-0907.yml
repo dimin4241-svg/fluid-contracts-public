@@ -1,0 +1,106 @@
+name: fSL feeOrReward canonical check 2026-08-18 0907
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - .github/workflows/fsl-fee-check-20260818-0907.yml
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Check all 21 exact canonical Routescan URLs
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, time, concurrent.futures
+          from datetime import datetime, timezone
+          import requests
+          SELECTOR='0xe47a882d'
+          TARGETS=[
+          ('Base',8453,'0x4563134183e45D9502015db14B263E31781099bB','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB'),
+          ('Base',8453,'0x983107BB3dcb71f3A30176114D8a17c454A62514','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514'),
+          ('Base',8453,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),
+          ('Base',8453,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Plasma',9745,'0x983107BB3dcb71f3A30176114D8a17c454A62514','https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514'),
+          ('Plasma',9745,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Polygon',137,'0xa779B6736385930145F4856226Cd3E3691B72458','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xa779B6736385930145F4856226Cd3E3691B72458'),
+          ('Polygon',137,'0x4563134183e45D9502015db14B263E31781099bB','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB'),
+          ('Polygon',137,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),
+          ('Polygon',137,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A','https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Arbitrum',42161,'0x82C53239c4CFC89A8E55A691422af24c18A944b1','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x82C53239c4CFC89A8E55A691422af24c18A944b1'),
+          ('Arbitrum',42161,'0x1F0bFd9862ae58208d26db0d80797974434EC013','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x1F0bFd9862ae58208d26db0d80797974434EC013'),
+          ('Arbitrum',42161,'0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E','https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E'),
+          ('Ethereum',1,'0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1'),
+          ('Ethereum',1,'0x9b1f75ea07723F331996831f6d04AD4900d1A3B3','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x9b1f75ea07723F331996831f6d04AD4900d1A3B3'),
+          ('Ethereum',1,'0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF'),
+          ('Ethereum',1,'0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2'),
+          ('Ethereum',1,'0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f'),
+          ('Ethereum',1,'0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6'),
+          ('Ethereum',1,'0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70'),
+          ('Ethereum',1,'0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c','https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c')]
+          FALLBACK={1:['https://ethereum-rpc.publicnode.com','https://eth-mainnet.g.alchemy.com/public'],8453:['https://mainnet.base.org','https://base-rpc.publicnode.com'],137:['https://polygon.drpc.org','https://polygon-bor-rpc.publicnode.com'],42161:['https://arb1.arbitrum.io/rpc','https://arbitrum-one-rpc.publicnode.com'],9745:['https://rpc.plasma.to','https://9745.rpc.thirdweb.com']}
+          def dec32(x):
+            v=int(x,16)&0xffffffff
+            return v-(1<<32) if v&0x80000000 else v
+          def get_route(t):
+            n,c,a,u=t
+            errs=[]
+            for i in range(3):
+              try:
+                r=requests.get(u,timeout=25,headers={'User-Agent':'fsl-watch/2026-08-18'}); r.raise_for_status(); j=r.json(); x=j.get('result')
+                if isinstance(x,str) and x.startswith('0x'): return {'network':n,'chain_id':c,'address':a,'url':u,'result':x,'source':'routescan'}
+                errs.append(f'bad payload {j}')
+              except Exception as e: errs.append(repr(e))
+              time.sleep(1+i)
+            return {'network':n,'chain_id':c,'address':a,'url':u,'errors':errs}
+          def rpc_call(rpc,address):
+            p={'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':address,'data':SELECTOR},'latest']}
+            r=requests.post(rpc,json=p,timeout=25,headers={'User-Agent':'fsl-watch/2026-08-18'}); r.raise_for_status(); j=r.json(); x=j.get('result')
+            if not (isinstance(x,str) and x.startswith('0x')): raise RuntimeError(f'bad payload {j}')
+            return x
+          with concurrent.futures.ThreadPoolExecutor(max_workers=21) as ex: rows=list(ex.map(get_route,TARGETS))
+          failures=[]
+          for row in rows:
+            if 'result' not in row:
+              errs=row.get('errors',[])
+              for rpc in FALLBACK.get(row['chain_id'],[]):
+                try: row['result']=rpc_call(rpc,row['address']); row['source']=rpc; break
+                except Exception as e: errs.append(f'{rpc}: {e!r}')
+              row['errors']=errs
+            if 'result' not in row: failures.append(row); continue
+            row['raw_int32']=dec32(row['result']); row['annual_percent']=row['raw_int32']/10000
+            if row['raw_int32']!=0:
+              conf=[]
+              for rpc in FALLBACK.get(row['chain_id'],[]):
+                try:
+                  x=rpc_call(rpc,row['address']); conf.append({'rpc':rpc,'result':x,'raw_int32':dec32(x),'match':x.lower()==row['result'].lower()})
+                except Exception as e: conf.append({'rpc':rpc,'error':repr(e)})
+              row['independent_confirmations']=conf
+          out={'checked_at_utc':datetime.now(timezone.utc).isoformat(),'target_count':len(TARGETS),'success_count':sum('result' in r for r in rows),'failure_count':len(failures),'nonzero':[r for r in rows if r.get('raw_int32',0)!=0],'results':rows,'failures':failures}
+          os.makedirs('security-results',exist_ok=True)
+          path='security-results/fsl-fee-check-20260818-0907.json'
+          with open(path,'w') as f: json.dump(out,f,indent=2)
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Commit result
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add security-results/fsl-fee-check-20260818-0907.json
+          git commit -m "Record fresh fSL feeOrReward check 2026-08-18 0907" || exit 0
+          git push origin HEAD:audit/read-only-dex-fees-20260805
