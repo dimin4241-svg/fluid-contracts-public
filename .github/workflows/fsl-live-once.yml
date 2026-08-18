@@ -40,3 +40,5 @@ jobs:
           git add automation/fsl-live-result.json automation/fsl-live-exit-code.txt
           git commit -m 'Record fresh fSL feeOrReward check [skip ci]' || exit 0
           git push origin HEAD:main
+
+# automation trigger: 2026-08-18T01:49Z
