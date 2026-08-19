@@ -89,3 +89,4 @@ jobs:
           print('SUMMARY '+json.dumps({'target_count':len(rows),'nonzero':nonzero,'unresolved':unresolved,'completed_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()},sort_keys=True),flush=True)
           if unresolved: raise SystemExit(2)
           PY
+# automation trigger 2026-08-19T11:46Z
