@@ -1,0 +1,566 @@
+{
+  "checked_at_utc": "2026-08-19T08:04:20.291741+00:00",
+  "target_count": 21,
+  "value_confirmed_count": 21,
+  "unconfirmed_count": 0,
+  "nonzero_count": 0,
+  "confirmed_nonzero_count": 0,
+  "results": [
+    {
+      "network": "Base",
+      "chain_id": 8453,
+      "address": "0x4563134183e45D9502015db14B263E31781099bB",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://base-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://base-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://base-rpc.publicnode.com"
+    },
+    {
+      "network": "Base",
+      "chain_id": 8453,
+      "address": "0x983107BB3dcb71f3A30176114D8a17c454A62514",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://base-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://base-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://base-rpc.publicnode.com"
+    },
+    {
+      "network": "Base",
+      "chain_id": 8453,
+      "address": "0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://base-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://base-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://base-rpc.publicnode.com"
+    },
+    {
+      "network": "Base",
+      "chain_id": 8453,
+      "address": "0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://base-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://base-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://base-rpc.publicnode.com"
+    },
+    {
+      "network": "Plasma",
+      "chain_id": 9745,
+      "address": "0x983107BB3dcb71f3A30176114D8a17c454A62514",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x983107BB3dcb71f3A30176114D8a17c454A62514",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Plasma",
+      "chain_id": 9745,
+      "address": "0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/9745/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Polygon",
+      "chain_id": 137,
+      "address": "0xa779B6736385930145F4856226Cd3E3691B72458",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xa779B6736385930145F4856226Cd3E3691B72458",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://polygon-bor-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://polygon-bor-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://polygon-bor-rpc.publicnode.com"
+    },
+    {
+      "network": "Polygon",
+      "chain_id": 137,
+      "address": "0x4563134183e45D9502015db14B263E31781099bB",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://polygon-bor-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://polygon-bor-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://polygon-bor-rpc.publicnode.com"
+    },
+    {
+      "network": "Polygon",
+      "chain_id": 137,
+      "address": "0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://polygon-bor-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://polygon-bor-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://polygon-bor-rpc.publicnode.com"
+    },
+    {
+      "network": "Polygon",
+      "chain_id": 137,
+      "address": "0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/137/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://polygon-bor-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://polygon-bor-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://polygon-bor-rpc.publicnode.com"
+    },
+    {
+      "network": "Arbitrum",
+      "chain_id": 42161,
+      "address": "0x82C53239c4CFC89A8E55A691422af24c18A944b1",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x82C53239c4CFC89A8E55A691422af24c18A944b1",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://arbitrum-one-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://arbitrum-one-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://arbitrum-one-rpc.publicnode.com"
+    },
+    {
+      "network": "Arbitrum",
+      "chain_id": 42161,
+      "address": "0x1F0bFd9862ae58208d26db0d80797974434EC013",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x1F0bFd9862ae58208d26db0d80797974434EC013",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://arbitrum-one-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://arbitrum-one-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://arbitrum-one-rpc.publicnode.com"
+    },
+    {
+      "network": "Arbitrum",
+      "chain_id": 42161,
+      "address": "0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/42161/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "status": "0",
+        "message": "chain not supported",
+        "result": null
+      },
+      "routescan_confirmed": false,
+      "routescan_error": "ValueError({'status': '0', 'message': 'chain not supported', 'result': None})",
+      "fallback_attempts": [
+        {
+          "rpc": "https://arbitrum-one-rpc.publicnode.com",
+          "http_status": 200,
+          "json": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "raw_int32": 0,
+          "annual_percent": 0.0
+        }
+      ],
+      "fallback_confirmed": true,
+      "fallback_rpc": "https://arbitrum-one-rpc.publicnode.com",
+      "fallback_result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fallback_raw_int32": 0,
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "source": "https://arbitrum-one-rpc.publicnode.com"
+    },
+    {
+      "network": "Ethereum",
+      "chain_id": 1,
+      "address": "0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Ethereum",
+      "chain_id": 1,
+      "address": "0x9b1f75ea07723F331996831f6d04AD4900d1A3B3",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x9b1f75ea07723F331996831f6d04AD4900d1A3B3",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Ethereum",
+      "chain_id": 1,
+      "address": "0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Ethereum",
+      "chain_id": 1,
+      "address": "0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Ethereum",
+      "chain_id": 1,
+      "address": "0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Ethereum",
+      "chain_id": 1,
+      "address": "0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Ethereum",
+      "chain_id": 1,
+      "address": "0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    },
+    {
+      "network": "Ethereum",
+      "chain_id": 1,
+      "address": "0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c",
+      "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/1/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c",
+      "routescan_http_status": 200,
+      "routescan_json": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "raw_int32": 0,
+      "annual_percent": 0.0,
+      "routescan_confirmed": true
+    }
+  ]
+}
