@@ -1,0 +1,39 @@
+name: fSL feeOrReward fresh check 2026-08-20T13:51Z
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - .github/workflows/fsl-check-20260820-1351Z.yml
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - name: Check all 21 fSL feeOrReward values
+        shell: bash
+        run: |
+          python3 -m pip install --quiet requests
+          mkdir -p automation-results
+          python3 scripts/security/check_fsl_fee_or_reward.py > automation-results/fsl-20260820-1351Z.json
+          rc=$?
+          cat automation-results/fsl-20260820-1351Z.json
+          if [ "$rc" -eq 2 ]; then exit 2; fi
+          exit 0
+      - name: Commit result
+        if: always()
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add automation-results/fsl-20260820-1351Z.json || true
+          git commit -m 'Store fSL check 2026-08-20T13:51Z' || exit 0
+          git push
