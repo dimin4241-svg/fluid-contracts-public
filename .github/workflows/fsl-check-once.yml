@@ -60,4 +60,4 @@ jobs:
               time.sleep(0.6)
           print('SUMMARY '+json.dumps({'count':len(out),'nonzero':[r for r in out if r.get('raw',0)!=0],'errors':[r for r in out if 'ERROR' in r]}), flush=True)
           PY
-# rerun 2026-08-15T17:49:00Z
+# rerun 2026-08-21T12:43:33Z
