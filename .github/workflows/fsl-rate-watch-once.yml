@@ -1,0 +1,34 @@
+name: fSL rate watch probe
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Probe all fSL contracts
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py > fsl_probe_result.json
+          code=$?
+          echo "checker_exit_code=$code"
+          cat fsl_probe_result.json
+          exit 0
+      - name: Persist result
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add fsl_probe_result.json
+          git commit -m "Persist fSL probe result" || exit 0
+          git push
