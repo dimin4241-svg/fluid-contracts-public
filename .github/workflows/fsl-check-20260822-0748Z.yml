@@ -1,0 +1,41 @@
+name: fSL feeOrReward check with persisted result
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - .github/workflows/fsl-check-20260822-0748Z.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - name: Run all 21 checks and persist result
+        shell: bash
+        run: |
+          python3 -m pip install requests >/dev/null 2>&1
+          set +e
+          python3 scripts/security/check_fsl_fee_or_reward.py > automation-fsl-latest-20260822.json
+          code=$?
+          set -e
+          python3 - <<'PY'
+          import json
+          p='automation-fsl-latest-20260822.json'
+          d=json.load(open(p))
+          d['workflow_exit_code']=${code}
+          json.dump(d,open(p,'w'),indent=2)
+          PY
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add automation-fsl-latest-20260822.json
+          git commit -m 'Persist fresh fSL feeOrReward check result' || true
+          git push origin HEAD:audit/read-only-dex-fees-20260805
