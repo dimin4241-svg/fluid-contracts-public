@@ -1,0 +1,71 @@
+name: fSL runtime check 2026-08-22
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fsl-runtime-check-20260822.yml'
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests
+      - name: Check all 21 canonical Routescan calls
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, requests
+          from datetime import datetime, timezone
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          selector='0xe47a882d'
+          targets=[
+          ('Base',8453,'0x4563134183e45D9502015db14B263E31781099bB'),('Base',8453,'0x983107BB3dcb71f3A30176114D8a17c454A62514'),('Base',8453,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),('Base',8453,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Plasma',9745,'0x983107BB3dcb71f3A30176114D8a17c454A62514'),('Plasma',9745,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Polygon',137,'0xa779B6736385930145F4856226Cd3E3691B72458'),('Polygon',137,'0x4563134183e45D9502015db14B263E31781099bB'),('Polygon',137,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),('Polygon',137,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Arbitrum',42161,'0x82C53239c4CFC89A8E55A691422af24c18A944b1'),('Arbitrum',42161,'0x1F0bFd9862ae58208d26db0d80797974434EC013'),('Arbitrum',42161,'0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E'),
+          ('Ethereum',1,'0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1'),('Ethereum',1,'0x9b1f75ea07723F331996831f6d04AD4900d1A3B3'),('Ethereum',1,'0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF'),('Ethereum',1,'0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2'),('Ethereum',1,'0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f'),('Ethereum',1,'0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6'),('Ethereum',1,'0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70'),('Ethereum',1,'0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c')]
+          fallbacks={1:['https://ethereum-rpc.publicnode.com','https://rpc.ankr.com/eth'],8453:['https://base-rpc.publicnode.com','https://mainnet.base.org'],137:['https://polygon-bor-rpc.publicnode.com','https://polygon-rpc.com'],42161:['https://arbitrum-one-rpc.publicnode.com','https://arb1.arbitrum.io/rpc'],9745:['https://rpc.plasma.to','https://plasma-rpc.publicnode.com']}
+          def dec(x):
+            n=int(x,16)&0xffffffff
+            return n-(1<<32) if n&0x80000000 else n
+          def one(t):
+            net,cid,a=t
+            url=f'https://api.routescan.io/v2/network/mainnet/evm/{cid}/etherscan/api?action=eth_call&data={selector}&module=proxy&tag=latest&to={a}'
+            errors=[]
+            try:
+              r=requests.get(url,timeout=25,headers={'User-Agent':'Mozilla/5.0'}); body=r.json(); result=body.get('result')
+              if isinstance(result,str) and result.startswith('0x'):
+                raw=dec(result); return {'network':net,'chain_id':cid,'address':a,'canonical_url':url,'source':'routescan','result':result,'raw_int32':raw,'annual_percent':raw/10000}
+              errors.append({'source':'routescan','status':r.status_code,'body':body})
+            except Exception as e: errors.append({'source':'routescan','error':repr(e)})
+            payload={'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':a,'data':selector},'latest']}
+            for rpc in fallbacks[cid]:
+              try:
+                rr=requests.post(rpc,json=payload,timeout=25); b=rr.json(); result=b.get('result')
+                if isinstance(result,str) and result.startswith('0x'):
+                  raw=dec(result); return {'network':net,'chain_id':cid,'address':a,'canonical_url':url,'source':rpc,'result':result,'raw_int32':raw,'annual_percent':raw/10000,'routescan_errors':errors}
+                errors.append({'source':rpc,'status':rr.status_code,'body':b})
+              except Exception as e: errors.append({'source':rpc,'error':repr(e)})
+            return {'network':net,'chain_id':cid,'address':a,'canonical_url':url,'error':errors}
+          rows=[]
+          with ThreadPoolExecutor(max_workers=21) as ex:
+            for f in as_completed([ex.submit(one,t) for t in targets]): rows.append(f.result())
+          rows.sort(key=lambda x:(x['chain_id'],x['address'].lower()))
+          out={'checked_at_utc':datetime.now(timezone.utc).isoformat(),'target_count':21,'success_count':sum('result'in x for x in rows),'failure_count':sum('error'in x for x in rows),'nonzero':[x for x in rows if x.get('raw_int32',0)!=0],'results':rows}
+          import os; os.makedirs('automation',exist_ok=True)
+          open('automation/fsl-latest.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Commit result
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add automation/fsl-latest.json
+          git commit -m 'Update fSL runtime check result' || exit 0
+          git push
