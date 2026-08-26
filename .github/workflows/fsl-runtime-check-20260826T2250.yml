@@ -1,0 +1,33 @@
+name: fSL Runtime Check 20260826T2250
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fsl-runtime-check-20260826T2250.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Run exact 21-contract checker
+        run: |
+          python scripts/security/check_fsl_fee_or_reward_exact_20260826.py > /tmp/fsl_runtime_result.json
+          cp /tmp/fsl_runtime_result.json fsl_runtime_result_20260826T2250.json
+      - name: Commit runtime result
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add fsl_runtime_result_20260826T2250.json
+          git commit -m 'Record fSL runtime check 20260826T2250' || exit 0
+          git push origin HEAD:audit/read-only-dex-fees-20260805
