@@ -1,0 +1,34 @@
+name: MOR direct-payment evidence
+
+on:
+  push:
+    branches: [mor-direct-payment-evidence]
+    paths:
+      - 'research/mor-direct-payment/**'
+      - '.github/workflows/mor-direct-payment-evidence.yml'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install ethers
+        run: npm install --no-save ethers@6
+      - name: Scan Base mainnet
+        run: node research/mor-direct-payment/find-direct-payment-evidence.mjs
+      - name: Show summary
+        if: always()
+        run: |
+          if [ -f research/mor-direct-payment/out/summary.md ]; then cat research/mor-direct-payment/out/summary.md; fi
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mor-direct-payment-evidence
+          path: research/mor-direct-payment/out/
+          if-no-files-found: warn
