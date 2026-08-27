@@ -32,3 +32,4 @@ jobs:
           path: |
             fsl-fee-or-reward.json
             fsl-fee-or-reward.stderr
+# automation-run-refresh
