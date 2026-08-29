@@ -1,0 +1,30 @@
+name: Security fSL feeOrReward watch
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install requests
+        run: python -m pip install --disable-pip-version-check requests
+      - name: Check all 21 deployed fSL contracts
+        shell: bash
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py | tee fsl-fee-or-reward.json
+          code=${PIPESTATUS[0]}
+          echo "checker_exit_code=$code"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fsl-fee-or-reward
+          path: fsl-fee-or-reward.json
