@@ -55,3 +55,4 @@ jobs:
               if any(v[2]!=0 for v in vals): nonzero.append({'network':row['network'],'chain_id':row['chain_id'],'address':row['address'],'vals':vals})
           print('SUMMARY '+json.dumps({'targets':len(rows),'nonzero':nonzero,'unconfirmed':unconfirmed,'mismatches':mismatches}),flush=True)
           PY
+# trigger 2026-08-29T16:01:30Z
