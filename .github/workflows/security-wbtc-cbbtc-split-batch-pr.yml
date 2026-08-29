@@ -55,3 +55,29 @@ jobs:
             wbtc-cbbtc-split-batch.log
             wbtc-cbbtc-split-batch-summary.log
           if-no-files-found: error
+
+  fsl-live-fee-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Check all 21 canonical fSL targets
+        shell: bash
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py | tee /tmp/fsl-check.json
+          code=${PIPESTATUS[0]}
+          echo "CHECKER_EXIT=$code"
+          if [ "$code" -eq 2 ]; then exit 2; fi
+          exit 0
+      - name: Upload fSL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsl-live-check
+          path: /tmp/fsl-check.json
+          if-no-files-found: error
