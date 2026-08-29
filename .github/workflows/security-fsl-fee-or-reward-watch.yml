@@ -39,3 +39,4 @@ jobs:
           name: fsl-fee-or-reward-results
           path: /tmp/fsl-results.json
           if-no-files-found: error
+# automation-trigger: 2026-08-29T07:46:00Z
