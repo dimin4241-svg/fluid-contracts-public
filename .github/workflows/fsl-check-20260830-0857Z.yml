@@ -1,0 +1,18 @@
+name: fSL feeOrReward canonical check 20260830-0857Z
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - .github/workflows/fsl-check-20260830-0857Z.yml
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check all 21 canonical fSL feeOrReward calls
+        run: python3 scripts/security/check_fsl_fee_or_reward.py
