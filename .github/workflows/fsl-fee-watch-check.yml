@@ -1,10 +1,11 @@
 name: fSL feeOrReward one-shot check
 
 on:
-  pull_request:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
     paths:
       - '.github/workflows/fsl-fee-watch-check.yml'
-      - 'scripts/security/check_fsl_fee_or_reward.py'
   workflow_dispatch:
 
 permissions:
@@ -34,5 +35,3 @@ jobs:
           name: fsl-result
           path: fsl-result.json
           retention-days: 1
-
-# automation trigger: 2026-08-06T02:58Z
