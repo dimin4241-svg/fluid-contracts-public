@@ -1,0 +1,82 @@
+name: fSL live check 2026-09-01 01:02Z
+
+on:
+  push:
+    branches: [audit/read-only-dex-fees-20260805]
+    paths: [.github/workflows/fsl-check-20260901-0102Z.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+          fetch-depth: 0
+      - name: Probe all 21 canonical Routescan URLs
+        shell: bash
+        run: |
+          mkdir -p automation-results
+          python3 - <<'PY'
+          import json, urllib.request, time
+          from datetime import datetime, timezone
+          selector='0xe47a882d'
+          targets=[
+          ('Base',8453,'0x4563134183e45D9502015db14B263E31781099bB'),('Base',8453,'0x983107BB3dcb71f3A30176114D8a17c454A62514'),('Base',8453,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),('Base',8453,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Plasma',9745,'0x983107BB3dcb71f3A30176114D8a17c454A62514'),('Plasma',9745,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Polygon',137,'0xa779B6736385930145F4856226Cd3E3691B72458'),('Polygon',137,'0x4563134183e45D9502015db14B263E31781099bB'),('Polygon',137,'0x3F6f85e3EDD95Db7f5D33b287D748dfEA64d92a6'),('Polygon',137,'0x4f0C96408aF08473051Ea3EA1FF3e4F288115A5A'),
+          ('Arbitrum',42161,'0x82C53239c4CFC89A8E55A691422af24c18A944b1'),('Arbitrum',42161,'0x1F0bFd9862ae58208d26db0d80797974434EC013'),('Arbitrum',42161,'0xdC1dF9E55f3B7EBD4F19001b294d1e537320BC2E'),
+          ('Ethereum',1,'0xb210249Bc59FE77D29eb5F0e566D60CB2B010EF1'),('Ethereum',1,'0x9b1f75ea07723F331996831f6d04AD4900d1A3B3'),('Ethereum',1,'0xD2245ee5C3099d65a3d0fdCecA0f71Cc4aA8f0FF'),('Ethereum',1,'0x44aE65F0d82E339c31c3Db9d4f82aB4D5d2B06B2'),('Ethereum',1,'0x10705D774fBE0a3802d7a915E23F6f2c109Fd77f'),('Ethereum',1,'0x7cA3814E21E96758d27e4e07B8d021DE70fC4Db6'),('Ethereum',1,'0x6Ee1e0FC4435571AABd95ecd441dE93C804d7f70'),('Ethereum',1,'0xe3eA95fBd0B27D3fF27e04a43aa5C4361376597c')]
+          fallbacks={1:['https://ethereum-rpc.publicnode.com','https://eth.llamarpc.com'],8453:['https://base-rpc.publicnode.com','https://mainnet.base.org'],137:['https://polygon-bor-rpc.publicnode.com','https://polygon-rpc.com'],42161:['https://arbitrum-one-rpc.publicnode.com','https://arb1.arbitrum.io/rpc'],9745:['https://rpc.plasma.to','https://plasma-rpc.publicnode.com']}
+          def canonical(cid,a): return f'https://api.routescan.io/v2/network/mainnet/evm/{cid}/etherscan/api?action=eth_call&data={selector}&module=proxy&tag=latest&to={a}'
+          def decode(s):
+            v=int(s,16)&0xffffffff
+            return v-(1<<32) if v&0x80000000 else v
+          def valid(s):
+            try: return isinstance(s,str) and s.startswith('0x') and int(s,16)>=0
+            except: return False
+          def get(u):
+            req=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0 fsl-watch'})
+            with urllib.request.urlopen(req,timeout=25) as r: return r.status,json.loads(r.read().decode())
+          def post(u,a):
+            data=json.dumps({'jsonrpc':'2.0','id':1,'method':'eth_call','params':[{'to':a,'data':selector},'latest']}).encode()
+            req=urllib.request.Request(u,data=data,headers={'content-type':'application/json','user-agent':'Mozilla/5.0 fsl-watch'})
+            with urllib.request.urlopen(req,timeout=25) as r: return r.status,json.loads(r.read().decode())
+          rows=[]
+          checked=datetime.now(timezone.utc).isoformat()
+          for net,cid,a in targets:
+            u=canonical(cid,a); rec={'network':net,'chain_id':cid,'address':a,'canonical_url':u}; rs=False
+            try:
+              st,j=get(u); s=j.get('result')
+              if not valid(s): raise ValueError(repr(j))
+              raw=decode(s); rec.update(routescan_confirmed=True,routescan_http_status=st,result=s,raw_int32=raw,annual_percent=raw/10000); rs=True
+            except Exception as e: rec.update(routescan_confirmed=False,routescan_error=repr(e))
+            if (not rs) or rec.get('raw_int32',0)!=0:
+              rec['fallback_attempts']=[]
+              for rpc in fallbacks[cid]:
+                att={'rpc':rpc}
+                try:
+                  st,j=post(rpc,a); s2=j.get('result')
+                  if not valid(s2): raise ValueError(repr(j))
+                  r2=decode(s2); att.update(http_status=st,result=s2,raw_int32=r2,annual_percent=r2/10000); rec['fallback_attempts'].append(att); rec.update(fallback_confirmed=True,fallback_rpc=rpc,fallback_result=s2,fallback_raw_int32=r2)
+                  if not rs: rec.update(result=s2,raw_int32=r2,annual_percent=r2/10000)
+                  break
+                except Exception as e: att['error']=repr(e); rec['fallback_attempts'].append(att)
+              else: rec['fallback_confirmed']=False
+            if rec.get('raw_int32',0)!=0: rec['nonzero_independently_confirmed']=bool(rs and rec.get('fallback_confirmed') and rec.get('fallback_raw_int32')==rec['raw_int32'])
+            rows.append(rec); time.sleep(.3)
+          summary={'checked_at_utc':checked,'target_count':21,'value_confirmed_count':sum('raw_int32' in x for x in rows),'unconfirmed_count':sum('raw_int32' not in x for x in rows),'nonzero_count':sum(x.get('raw_int32',0)!=0 for x in rows),'confirmed_nonzero_count':sum(bool(x.get('nonzero_independently_confirmed')) for x in rows),'results':rows}
+          print(json.dumps(summary,indent=2))
+          with open('automation-results/fsl-current-live.json','w') as f: json.dump(summary,f,indent=2)
+          PY
+      - name: Commit result
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add automation-results/fsl-current-live.json
+          git commit -m 'Record fresh fSL live probe 2026-09-01' || exit 0
+          git push origin HEAD:audit/read-only-dex-fees-20260805
