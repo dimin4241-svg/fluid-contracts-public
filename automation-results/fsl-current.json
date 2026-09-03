@@ -1,6 +1,6 @@
 FSL_CHECK_JSON_START
 {
-  "checked_at_utc": "2026-09-03T02:57:30.483446+00:00",
+  "checked_at_utc": "2026-09-03T03:56:43.689932+00:00",
   "target_count": 21,
   "success_count": 21,
   "failure_count": 0,
@@ -11,7 +11,7 @@ FSL_CHECK_JSON_START
       "chain_id": 8453,
       "address": "0x4563134183e45D9502015db14B263E31781099bB",
       "canonical_url": "https://api.routescan.io/v2/network/mainnet/evm/8453/etherscan/api?action=eth_call&data=0xe47a882d&module=proxy&tag=latest&to=0x4563134183e45D9502015db14B263E31781099bB",
-      "source": "https://base-rpc.publicnode.com",
+      "source": "https://mainnet.base.org",
       "result": "0x0000000000000000000000000000000000000000000000000000000000000000",
       "raw_int32": 0,
       "annual_percent": 0.0
