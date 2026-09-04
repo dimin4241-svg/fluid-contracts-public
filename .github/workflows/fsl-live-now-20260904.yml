@@ -1,0 +1,38 @@
+name: fSL live canonical check 20260904
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - .github/workflows/fsl-live-now-20260904.yml
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/read-only-dex-fees-20260805
+          fetch-depth: 0
+      - name: Run all 21 fSL feeOrReward calls
+        shell: bash
+        run: |
+          mkdir -p automation-results
+          set +e
+          python3 scripts/security/check_fsl_fee_or_reward.py | tee automation-results/fsl-live-20260904.json
+          code=${PIPESTATUS[0]}
+          echo "checker_exit_code=$code" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+      - name: Commit result
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add automation-results/fsl-live-20260904.json
+          git commit -m 'Record fSL live check 2026-09-04' || exit 0
+          git push origin HEAD:audit/read-only-dex-fees-20260805
