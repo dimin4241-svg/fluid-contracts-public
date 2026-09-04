@@ -1,6 +1,8 @@
 name: fSL feeOrReward one-shot check
 
 on:
+  push:
+    branches: [audit/read-only-dex-fees-20260805]
   pull_request:
     branches: [main]
   workflow_dispatch:
