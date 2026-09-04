@@ -1,4 +1,4 @@
-name: fSL feeOrReward fresh check 2026-08-20T13:51Z
+name: fSL feeOrReward fresh check 2026-09-04T19:29Z
 
 on:
   push:
@@ -23,9 +23,9 @@ jobs:
         run: |
           python3 -m pip install --quiet requests
           mkdir -p automation-results
-          python3 scripts/security/check_fsl_fee_or_reward.py > automation-results/fsl-20260820-1351Z.json
+          python3 scripts/security/check_fsl_fee_or_reward.py > automation-results/fsl-20260904-1929Z.json
           rc=$?
-          cat automation-results/fsl-20260820-1351Z.json
+          cat automation-results/fsl-20260904-1929Z.json
           if [ "$rc" -eq 2 ]; then exit 2; fi
           exit 0
       - name: Commit result
@@ -34,6 +34,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add automation-results/fsl-20260820-1351Z.json || true
-          git commit -m 'Store fSL check 2026-08-20T13:51Z' || exit 0
+          git add automation-results/fsl-20260904-1929Z.json || true
+          git commit -m 'Store fSL check 2026-09-04T19:29Z' || exit 0
           git push
