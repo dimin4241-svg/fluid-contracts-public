@@ -1,0 +1,31 @@
+name: fSL current check 2026-09-07 17:13Z
+
+on:
+  push:
+    branches:
+      - audit/read-only-dex-fees-20260805
+    paths:
+      - '.github/workflows/fsl-check-20260907-1713.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check requests
+      - name: Run exhaustive fSL feeOrReward check
+        shell: bash
+        run: |
+          set +e
+          python scripts/security/check_fsl_fee_or_reward.py | tee fsl-current.json
+          code=${PIPESTATUS[0]}
+          echo "CHECK_EXIT_CODE=$code"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fsl-current-20260907-1713
+          path: fsl-current.json
