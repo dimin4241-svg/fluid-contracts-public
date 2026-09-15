@@ -1,0 +1,1 @@
+Trigger exact fSL feeOrReward check for current automation run.
